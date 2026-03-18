@@ -2,11 +2,16 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from app.routers import news, briefing, portfolio
 from app.scheduler import start_scheduler
+from app.services import analyzer
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await analyzer.init_client()   # FinBERT 클라이언트 초기화
     start_scheduler()
     yield
+    await analyzer.close_client()  # 앱 종료 시 클라이언트 정리
+
 
 app = FastAPI(title="AI News Curation API", lifespan=lifespan)
 

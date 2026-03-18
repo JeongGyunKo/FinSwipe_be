@@ -6,9 +6,9 @@ class Settings(BaseSettings):
     supabase_key: str
     supabase_service_key: str
     finnhub_api_key: str
-    genai_server_url: str = "http://localhost:8001"
+
     finbert_url: str = "https://finbert-du3j.onrender.com"
-    finbert_user: str = "teamuser"
+    finbert_user: str
     finbert_password: str
 
     class Config:
