@@ -114,6 +114,18 @@ async def enrich_article(
             return _unavailable(f"알 수 없는 오류: {str(e)}")
 
 
+def _build_text(article: dict) -> str | None:
+    """본문 → summary → title+summary 순으로 텍스트 구성"""
+    content = article.get("content")
+    if content and len(content.strip()) > 100:
+        return content
+
+    title = article.get("title", article.get("headline", ""))
+    summary = article.get("summary", "")
+    combined = f"{title}. {summary}".strip() if summary else title
+    return combined if combined else None
+
+
 def _unavailable(reason: str) -> dict:
     return {
         "status": "unavailable",
@@ -132,7 +144,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
             news_id=str(a.get("id", a.get("link", ""))),
             title=a.get("title", a.get("headline", "")),
             link=a.get("link", a.get("source_url", "")),
-            content=a.get("content"),  # Finlight 본문 텍스트
+            content=_build_text(a),
             tickers=a.get("tickers") or None,
             published_at=a.get("publishDate", a.get("published_at")),
         )
