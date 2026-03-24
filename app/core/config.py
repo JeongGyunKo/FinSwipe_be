@@ -5,11 +5,12 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_key: str
     supabase_service_key: str
-    finnhub_api_key: str
 
-    finbert_url: str = "https://fin-ft1a.onrender.com"
-    finbert_user: str
-    finbert_password: str
+    finlight_api_key: str
+
+    genai_url: str = "https://fin-ft1a.onrender.com"
+    genai_user: str
+    genai_password: str
 
     class Config:
         env_file = ".env"

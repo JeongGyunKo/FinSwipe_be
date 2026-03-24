@@ -1,44 +1,30 @@
 import httpx
-from datetime import datetime, timezone
 from app.core.config import settings
 from app.core.supabase import supabase_admin
 
-FINNHUB_BASE_URL = "https://finnhub.io/api/v1"
+FINLIGHT_BASE_URL = "https://api.finlight.me"
 
 
-async def fetch_market_news() -> list:
-    """Finnhub에서 일반 시장 뉴스 가져오기"""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(
-            f"{FINNHUB_BASE_URL}/news",
-            params={"category": "general", "token": settings.finnhub_api_key}
-        )
-        response.raise_for_status()
-        return response.json()
-
-
-async def fetch_company_news(ticker: str) -> list:
-    """특정 종목 뉴스 가져오기"""
-    from datetime import date, timedelta
-    today = date.today()
-    week_ago = today - timedelta(days=7)
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(
-            f"{FINNHUB_BASE_URL}/company-news",
-            params={
-                "symbol": ticker,
-                "from": week_ago.isoformat(),
-                "to": today.isoformat(),
-                "token": settings.finnhub_api_key
+async def fetch_news_from_finlight(query: str = "stock market finance", page_size: int = 50) -> list:
+    """Finlight에서 뉴스 + 본문 수집"""
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.post(
+            f"{FINLIGHT_BASE_URL}/v2/articles",
+            headers={"X-API-KEY": settings.finlight_api_key},
+            json={
+                "query": query,
+                "language": "en",
+                "pageSize": page_size,
+                "includeContent": True,
             }
         )
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        return data.get("articles", [])
 
 
 def save_news_to_db(articles: list) -> dict:
-    """뉴스 DB에 배치 저장 (중복 방지 upsert)"""
+    """뉴스 DB 배치 저장 (본문 제외, 분석 결과 포함)"""
     if not articles:
         return {"saved": 0, "skipped": 0}
 
@@ -46,18 +32,24 @@ def save_news_to_db(articles: list) -> dict:
     skipped = 0
 
     for article in articles:
-        if not article.get("url") or not article.get("headline"):
+        if not article.get("link") or not article.get("title"):
             skipped += 1
             continue
+
+        enrichment = article.get("enrichment") or {}
+        sentiment = enrichment.get("sentiment")
+
         valid.append({
-            "headline": article.get("headline", ""),
+            "headline": article["title"],
             "summary": article.get("summary", ""),
-            "source_url": article["url"],
-            "tickers": article.get("related", "").split(",") if article.get("related") else [],
+            "source_url": article["link"],
+            "categories": article.get("categories", []),
+            "countries": article.get("countries", []),
             "is_paywalled": False,
-            "published_at": datetime.fromtimestamp(
-                article.get("datetime", 0), tz=timezone.utc
-            ).isoformat()
+            "published_at": article.get("publishDate"),
+            "sentiment_label": sentiment.get("label") if sentiment else None,
+            "sentiment_score": sentiment.get("score") if sentiment else None,
+            "summary_3lines": enrichment.get("summary_3lines", []),
         })
 
     if not valid:
@@ -65,8 +57,7 @@ def save_news_to_db(articles: list) -> dict:
 
     try:
         supabase_admin.table("news_articles").upsert(
-            valid,
-            on_conflict="source_url"
+            valid, on_conflict="source_url"
         ).execute()
         return {"saved": len(valid), "skipped": skipped}
     except Exception as e:
@@ -75,9 +66,15 @@ def save_news_to_db(articles: list) -> dict:
 
 
 async def collect_market_news():
-    """전체 뉴스 수집 파이프라인"""
+    """전체 뉴스 수집 파이프라인 (Finlight → GenAI 분석 → DB 저장)"""
+    from app.services.analyzer import analyze_news_batch
+
     print("뉴스 수집 시작...")
-    articles = await fetch_market_news()
-    result = save_news_to_db(articles)
+    articles = await fetch_news_from_finlight()
+    print(f"Finlight에서 {len(articles)}개 기사 수집")
+
+    enriched = await analyze_news_batch(articles)
+
+    result = save_news_to_db(enriched)
     print(f"수집 완료 → 저장: {result['saved']}개, 스킵: {result['skipped']}개")
     return result

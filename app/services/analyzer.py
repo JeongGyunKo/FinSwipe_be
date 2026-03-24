@@ -2,101 +2,40 @@ import asyncio
 import httpx
 from app.core.config import settings
 
-# FinBERT 동시 요청 제한 (Render 무료 서버 부하 방지)
+# GenAI 서버 동시 요청 제한 (Render 부하 방지)
 _semaphore = asyncio.Semaphore(3)
 
-# 앱 생애주기 동안 재사용할 클라이언트 (연결 풀)
+# 앱 전체에서 재사용할 클라이언트 (연결 풀)
 _client: httpx.AsyncClient | None = None
 
 
 def get_client() -> httpx.AsyncClient:
     if _client is None:
-        raise RuntimeError("FinBERT 클라이언트가 초기화되지 않았습니다. init_client()를 먼저 호출하세요.")
+        raise RuntimeError("GenAI 클라이언트가 초기화되지 않았습니다")
     return _client
 
 
 async def init_client() -> None:
-    """앱 시작 시 한 번 호출 — 클라이언트 생성 및 연결 풀 초기화"""
+    """앱 시작 시 한 번 호출"""
     global _client
     _client = httpx.AsyncClient(
-        base_url=settings.finbert_url,
-        auth=(settings.finbert_user, settings.finbert_password),
-        timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0),
+        base_url=settings.genai_url,
+        auth=(settings.genai_user, settings.genai_password),
+        timeout=httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=5.0),
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
     )
 
 
 async def close_client() -> None:
-    """앱 종료 시 한 번 호출 — 클라이언트 정리"""
+    """앱 종료 시 한 번 호출"""
     global _client
     if _client is not None:
         await _client.aclose()
         _client = None
 
 
-async def analyze_sentiment(text: str) -> dict:
-    """FinBERT API로 단일 텍스트 감성 분석"""
-    async with _semaphore:
-        try:
-            response = await get_client().post("/predict", json={"text": text})
-            response.raise_for_status()
-            return response.json()
-
-        except httpx.ConnectError:
-            return _unavailable("FinBERT 서버에 연결할 수 없습니다 (서버 꺼짐)")
-        except httpx.TimeoutException:
-            return _unavailable("FinBERT 서버 응답 시간 초과")
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 503:
-                return _unavailable("FinBERT 서버가 일시 중단 상태입니다 (Render suspended)")
-            return _unavailable(f"FinBERT 오류: HTTP {e.response.status_code}")
-        except RuntimeError as e:
-            return _unavailable(str(e))
-        except Exception as e:
-            return _unavailable(f"알 수 없는 오류: {str(e)}")
-
-
-def _unavailable(reason: str) -> dict:
-    return {
-        "label": "unavailable",
-        "positive": None,
-        "negative": None,
-        "neutral": None,
-        "error": reason,
-    }
-
-
-async def analyze_news_sentiment(headline: str, summary: str = "") -> dict:
-    """뉴스 헤드라인 + 요약으로 감성 분석"""
-    text = f"{headline}. {summary}".strip() if summary else headline
-    result = await analyze_sentiment(text)
-    return {
-        "label": result.get("label"),
-        "positive": result.get("positive"),
-        "negative": result.get("negative"),
-        "neutral": result.get("neutral"),
-        "error": result.get("error"),
-    }
-
-
-async def analyze_news_batch(articles: list[dict]) -> list[dict]:
-    """뉴스 목록 병렬 감성 분석 (FinBERT 꺼져 있어도 결과 반환)"""
-    tasks = [
-        analyze_news_sentiment(
-            headline=a.get("headline", ""),
-            summary=a.get("summary", ""),
-        )
-        for a in articles
-    ]
-    results = await asyncio.gather(*tasks)
-    return [
-        {**article, "sentiment": result}
-        for article, result in zip(articles, results)
-    ]
-
-
-async def check_finbert_health() -> dict:
-    """FinBERT 서버 상태 확인"""
+async def check_genai_health() -> dict:
+    """GenAI 서버 상태 확인"""
     try:
         response = await get_client().get("/health")
         if response.status_code == 200:
@@ -104,7 +43,6 @@ async def check_finbert_health() -> dict:
         if response.status_code == 503:
             return {"status": "suspended", "reason": "Render 서버 일시 중단"}
         return {"status": "error", "code": response.status_code}
-
     except httpx.ConnectError:
         return {"status": "offline", "reason": "연결 불가 (서버 꺼짐)"}
     except httpx.TimeoutException:
@@ -113,3 +51,95 @@ async def check_finbert_health() -> dict:
         return {"status": "offline", "reason": str(e)}
     except Exception as e:
         return {"status": "offline", "reason": str(e)}
+
+
+async def enrich_article(
+    news_id: str,
+    title: str,
+    link: str,
+    content: str | None = None,
+    tickers: list[str] | None = None,
+    published_at: str | None = None,
+) -> dict:
+    """
+    GenAI 서버로 기사 분석 요청.
+    content(본문 텍스트)가 있으면 직접 전달 → 크롤링 없이 분석.
+    서버 꺼짐 / 오류 시 unavailable 반환.
+    """
+    async with _semaphore:
+        try:
+            payload: dict = {
+                "news_id": news_id,
+                "title": title,
+                "link": link,
+            }
+            if content:
+                payload["text"] = content  # 본문 텍스트 직접 전달 (크롤링 불필요)
+            if tickers:
+                payload["ticker"] = tickers
+            if published_at:
+                payload["published_at"] = published_at
+
+            response = await get_client().post("/api/v1/articles/enrich", json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+            sentiment = data.get("sentiment")
+            mixed = data.get("mixed_flags")
+
+            return {
+                "status": data.get("status"),
+                "outcome": data.get("outcome"),
+                "sentiment": {
+                    "label": sentiment.get("label"),
+                    "score": sentiment.get("score"),
+                    "confidence": sentiment.get("confidence"),
+                } if sentiment else None,
+                "summary_3lines": [s["text"] for s in data.get("summary_3lines", [])],
+                "is_mixed": mixed.get("is_mixed") if mixed else None,
+                "error": data.get("error"),
+            }
+
+        except httpx.ConnectError:
+            return _unavailable("GenAI 서버에 연결할 수 없습니다 (서버 꺼짐)")
+        except httpx.TimeoutException:
+            return _unavailable("GenAI 서버 응답 시간 초과")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 503:
+                return _unavailable("GenAI 서버 일시 중단 (Render suspended)")
+            return _unavailable(f"GenAI 서버 오류: HTTP {e.response.status_code}")
+        except RuntimeError as e:
+            return _unavailable(str(e))
+        except Exception as e:
+            return _unavailable(f"알 수 없는 오류: {str(e)}")
+
+
+def _unavailable(reason: str) -> dict:
+    return {
+        "status": "unavailable",
+        "outcome": "fatal_failure",
+        "sentiment": None,
+        "summary_3lines": [],
+        "is_mixed": None,
+        "error": {"code": "server_unavailable", "message": reason},
+    }
+
+
+async def analyze_news_batch(articles: list[dict]) -> list[dict]:
+    """뉴스 목록 병렬 분석 (서버 꺼져 있어도 결과 반환)"""
+    tasks = [
+        enrich_article(
+            news_id=str(a.get("id", a.get("link", ""))),
+            title=a.get("title", a.get("headline", "")),
+            link=a.get("link", a.get("source_url", "")),
+            content=a.get("content"),  # Finlight 본문 텍스트
+            tickers=a.get("tickers") or None,
+            published_at=a.get("publishDate", a.get("published_at")),
+        )
+        for a in articles
+    ]
+    results = await asyncio.gather(*tasks)
+    return [
+        {**article, "enrichment": result}
+        for article, result in zip(articles, results)
+    ]
