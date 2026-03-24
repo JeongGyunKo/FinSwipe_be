@@ -3,7 +3,7 @@ import httpx
 from app.core.config import settings
 
 # GenAI 서버 동시 요청 제한 (Render 부하 방지)
-_semaphore = asyncio.Semaphore(3)
+_semaphore = asyncio.Semaphore(5)
 
 # 앱 전체에서 재사용할 클라이언트 (연결 풀)
 _client: httpx.AsyncClient | None = None
