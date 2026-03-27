@@ -2,8 +2,8 @@ import asyncio
 import httpx
 from app.core.config import settings
 
-# GenAI 서버 동시 요청 제한
-_semaphore = asyncio.Semaphore(5)
+# GenAI 서버 동시 요청 제한 (1: "Already borrowed" 방지)
+_semaphore = asyncio.Semaphore(1)
 
 # 앱 전체에서 재사용할 클라이언트 (연결 풀)
 _client: httpx.AsyncClient | None = None
@@ -141,14 +141,15 @@ async def enrich_article(
 
 
 def _build_text(article: dict) -> str | None:
-    """본문 → summary → title+summary 순으로 텍스트 구성"""
-    content = article.get("content")
-    if content and len(content.strip()) > 100:
-        return content
-
+    """
+    GenAI(XAI) 분석용 텍스트 구성.
+    전략: headline + Finlight summary 사용 (짧은 텍스트 → XAI 빠름)
+    전체 원문(content)은 DB에만 저장하고 GenAI에 보내지 않음.
+    이유: 원문 2,500자 전송 시 XAI가 300~400초 걸려 타임아웃 발생
+    """
     title = article.get("title", article.get("headline", ""))
     summary = article.get("summary", "")
-    combined = f"{title}. {summary}".strip() if summary else title
+    combined = f"{title}. {summary}".strip() if summary else title.strip()
     return combined if combined else None
 
 
