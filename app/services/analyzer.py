@@ -84,6 +84,9 @@ async def enrich_article(
             response.raise_for_status()
             data = response.json()
 
+            # 디버그: 실제 GenAI 응답 구조 확인
+            print(f"[GenAI 응답] keys={list(data.keys())} sentiment={data.get('sentiment')} summary_sample={data.get('summary_3lines', [])[:1]}")
+
             sentiment = data.get("sentiment")
             mixed = data.get("mixed_flags")
 
@@ -96,10 +99,10 @@ async def enrich_article(
                     "confidence": sentiment.get("confidence"),
                 }
 
-            # summary_3lines에서 text 키 없으면 안전하게 스킵
+            # summary_3lines에서 text 또는 content 키로 추출
             summary_3lines = [
-                s["text"] for s in data.get("summary_3lines", [])
-                if isinstance(s, dict) and "text" in s
+                s.get("text") or s.get("content", "") for s in data.get("summary_3lines", [])
+                if isinstance(s, dict) and (s.get("text") or s.get("content"))
             ]
 
             return {
