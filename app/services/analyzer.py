@@ -2,7 +2,7 @@ import asyncio
 import httpx
 from app.core.config import settings
 
-# GenAI 서버 동시 요청 제한 (Render 부하 방지)
+# GenAI 서버 동시 요청 제한
 _semaphore = asyncio.Semaphore(5)
 
 # 앱 전체에서 재사용할 클라이언트 (연결 풀)
@@ -41,7 +41,7 @@ async def check_genai_health() -> dict:
         if response.status_code == 200:
             return {"status": "ok"}
         if response.status_code == 503:
-            return {"status": "suspended", "reason": "Render 서버 일시 중단"}
+            return {"status": "suspended", "reason": "서버 일시 중단"}
         return {"status": "error", "code": response.status_code}
     except httpx.ConnectError:
         return {"status": "offline", "reason": "연결 불가 (서버 꺼짐)"}
@@ -74,7 +74,7 @@ async def enrich_article(
                 "link": link,
             }
             if content:
-                payload["text"] = content  # 본문 텍스트 직접 전달 (크롤링 불필요)
+                payload["text"] = content
             if tickers:
                 payload["ticker"] = tickers
             if published_at:
@@ -87,16 +87,27 @@ async def enrich_article(
             sentiment = data.get("sentiment")
             mixed = data.get("mixed_flags")
 
-            return {
-                "status": data.get("status"),
-                "outcome": data.get("outcome"),
-                "sentiment": {
+            # sentiment가 None이면 전체 블록을 None으로 처리
+            sentiment_block = None
+            if isinstance(sentiment, dict):
+                sentiment_block = {
                     "label": sentiment.get("label"),
                     "score": sentiment.get("score"),
                     "confidence": sentiment.get("confidence"),
-                } if sentiment else None,
-                "summary_3lines": [s["text"] for s in data.get("summary_3lines", [])],
-                "is_mixed": mixed.get("is_mixed") if mixed else None,
+                }
+
+            # summary_3lines에서 text 키 없으면 안전하게 스킵
+            summary_3lines = [
+                s["text"] for s in data.get("summary_3lines", [])
+                if isinstance(s, dict) and "text" in s
+            ]
+
+            return {
+                "status": data.get("status"),
+                "outcome": data.get("outcome"),
+                "sentiment": sentiment_block,
+                "summary_3lines": summary_3lines,
+                "is_mixed": mixed.get("is_mixed") if isinstance(mixed, dict) else None,
                 "error": data.get("error"),
             }
 
@@ -107,15 +118,15 @@ async def enrich_article(
             print(f"[GenAI 오류] 타임아웃: {e}")
             return _unavailable("GenAI 서버 응답 시간 초과")
         except httpx.HTTPStatusError as e:
-            print(f"[GenAI 오류] HTTP {e.response.status_code}: {e.response.text[:200]}")
+            print(f"[GenAI 오류] HTTP {e.response.status_code}")
             if e.response.status_code == 503:
-                return _unavailable("GenAI 서버 일시 중단 (Render suspended)")
+                return _unavailable("GenAI 서버 일시 중단")
             return _unavailable(f"GenAI 서버 오류: HTTP {e.response.status_code}")
         except RuntimeError as e:
             print(f"[GenAI 오류] 런타임: {e}")
             return _unavailable(str(e))
         except Exception as e:
-            print(f"[GenAI 오류] 알 수 없는 오류: {type(e).__name__}: {e}")
+            print(f"[GenAI 오류] {type(e).__name__}: {e}")
             return _unavailable(f"알 수 없는 오류: {str(e)}")
 
 
@@ -146,22 +157,26 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
     """뉴스 목록 병렬 분석 (서버 꺼져 있어도 결과 반환)"""
     valid = [
         a for a in articles
-        if (a.get("link") or a.get("source_url", "")).startswith("http")
+        if (a.get("link") or a.get("source_url") or "").startswith("http")
     ]
 
     tasks = [
         enrich_article(
-            news_id=str(a.get("id", a.get("link", ""))),
-            title=a.get("title", a.get("headline", "")),
-            link=a.get("link") or a.get("source_url", ""),
+            news_id=str(a.get("id") or a.get("link") or ""),
+            title=a.get("title") or a.get("headline") or "",
+            link=a.get("link") or a.get("source_url") or "",
             content=_build_text(a),
             tickers=a.get("tickers") or None,
-            published_at=a.get("publishDate", a.get("published_at")),
+            published_at=a.get("publishDate") or a.get("published_at"),
         )
         for a in valid
     ]
-    results = await asyncio.gather(*tasks)
-    return [
-        {**article, "enrichment": result}
-        for article, result in zip(valid, results)
-    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    output = []
+    for article, result in zip(valid, results):
+        if isinstance(result, Exception):
+            print(f"[GenAI 오류] 개별 분석 실패: {result}")
+            result = _unavailable(str(result))
+        output.append({**article, "enrichment": result})
+    return output
