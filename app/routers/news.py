@@ -1,7 +1,8 @@
+import asyncio
 from fastapi import APIRouter
 from pydantic import BaseModel
 from app.core.supabase import supabase_admin as supabase
-from app.services.news_collector import collect_market_news
+from app.services.news_collector import collect_market_news, analyze_and_update
 from app.services.analyzer import enrich_article, analyze_news_batch, check_genai_health
 
 router = APIRouter()
@@ -79,3 +80,35 @@ async def analyze_latest(limit: int = 10):
         "count": len(analyzed),
         "data": analyzed
     }
+
+
+@router.post("/reanalyze")
+async def reanalyze_pending(limit: int = 50):
+    """미분석 기사 백그라운드 재분석 (sentiment/summary가 없는 기사)"""
+    result = supabase.table("news_articles")\
+        .select("id,headline,summary,source_url,content,published_at")\
+        .is_("sentiment_label", "null")\
+        .order("published_at", desc=True)\
+        .limit(limit)\
+        .execute()
+
+    articles = [
+        {
+            "title": a["headline"],
+            "link": a["source_url"],
+            "source_url": a["source_url"],
+            "content": a.get("content"),
+            "summary": a.get("summary", ""),
+            "published_at": a.get("published_at"),
+        }
+        for a in result.data
+    ]
+
+    if not articles:
+        return {"message": "미분석 기사 없음", "count": 0}
+
+    task = asyncio.create_task(analyze_and_update(articles))
+    task.add_done_callback(
+        lambda t: print(f"[재분석] 오류: {t.exception()}") if t.exception() else None
+    )
+    return {"message": "백그라운드 재분석 시작", "count": len(articles)}
