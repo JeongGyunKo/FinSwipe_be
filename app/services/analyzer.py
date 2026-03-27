@@ -21,7 +21,7 @@ async def init_client() -> None:
     _client = httpx.AsyncClient(
         base_url=settings.genai_url,
         auth=(settings.genai_user, settings.genai_password),
-        timeout=httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=5.0),
+        timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=5.0),
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
     )
 
