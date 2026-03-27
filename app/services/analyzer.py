@@ -2,8 +2,8 @@ import asyncio
 import httpx
 from app.core.config import settings
 
-# GenAI 서버 동시 요청 제한
-_semaphore = asyncio.Semaphore(5)
+# GenAI 서버 동시 요청 제한 (sentiment 모델 동시 접근 불가 → 1로 제한)
+_semaphore = asyncio.Semaphore(1)
 
 # 앱 전체에서 재사용할 클라이언트 (연결 풀)
 _client: httpx.AsyncClient | None = None
