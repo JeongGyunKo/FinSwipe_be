@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 from app.core.supabase import supabase_admin as supabase
-from app.services.news_collector import collect_market_news
+from app.services.news_collector import collect_market_news, analyze_and_update
 from app.services.analyzer import enrich_article, analyze_news_batch, check_genai_health
 
 router = APIRouter()
@@ -64,6 +64,23 @@ async def analyze_single(body: AnalyzeRequest):
         tickers=body.tickers or None,
         published_at=body.published_at or None,
     )
+
+
+@router.get("/reanalyze")
+async def reanalyze_unanalyzed(limit: int = 50):
+    """sentiment가 NULL인 기사 재분석 트리거 (백그라운드)"""
+    import asyncio
+    result = supabase.table("news_articles")\
+        .select("*")\
+        .is_("sentiment_label", "null")\
+        .order("published_at", desc=True)\
+        .limit(limit)\
+        .execute()
+    articles = result.data
+    if not articles:
+        return {"triggered": 0, "message": "재분석할 기사 없음"}
+    asyncio.create_task(analyze_and_update(articles))
+    return {"triggered": len(articles)}
 
 
 @router.get("/analyze/latest")
