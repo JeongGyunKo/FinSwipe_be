@@ -144,19 +144,24 @@ def _unavailable(reason: str) -> dict:
 
 async def analyze_news_batch(articles: list[dict]) -> list[dict]:
     """뉴스 목록 병렬 분석 (서버 꺼져 있어도 결과 반환)"""
+    valid = [
+        a for a in articles
+        if (a.get("link") or a.get("source_url", "")).startswith("http")
+    ]
+
     tasks = [
         enrich_article(
             news_id=str(a.get("id", a.get("link", ""))),
             title=a.get("title", a.get("headline", "")),
-            link=a.get("link", a.get("source_url", "")),
+            link=a.get("link") or a.get("source_url", ""),
             content=_build_text(a),
             tickers=a.get("tickers") or None,
             published_at=a.get("publishDate", a.get("published_at")),
         )
-        for a in articles
+        for a in valid
     ]
     results = await asyncio.gather(*tasks)
     return [
         {**article, "enrichment": result}
-        for article, result in zip(articles, results)
+        for article, result in zip(valid, results)
     ]
