@@ -85,6 +85,7 @@ def save_news_to_db(articles: list[dict]) -> dict:
             "headline": article["title"],
             "summary": article.get("summary", ""),
             "source_url": article["link"],
+            "content": article.get("content") or None,
             "categories": article.get("categories", []),
             "countries": article.get("countries", []),
             "is_paywalled": False,
@@ -148,6 +149,21 @@ async def analyze_and_update(articles: list[dict]) -> None:
 
     except Exception as e:
         print(f"[백그라운드] 분석 파이프라인 오류: {type(e).__name__}: {e}")
+
+
+def cleanup_old_content() -> None:
+    """24시간 지난 기사 원문 삭제 (요약본은 유지)"""
+    try:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        result = supabase_admin.table("news_articles")\
+            .update({"content": None})\
+            .lt("created_at", cutoff)\
+            .not_.is_("content", "null")\
+            .execute()
+        print(f"[정리] 24시간 이상 된 원문 삭제 완료")
+    except Exception as e:
+        print(f"[정리] 원문 삭제 실패: {e}")
 
 
 async def collect_market_news() -> dict:
