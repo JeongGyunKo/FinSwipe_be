@@ -100,17 +100,22 @@ async def enrich_article(
                 "error": data.get("error"),
             }
 
-        except httpx.ConnectError:
+        except httpx.ConnectError as e:
+            print(f"[GenAI 오류] 연결 실패: {e}")
             return _unavailable("GenAI 서버에 연결할 수 없습니다 (서버 꺼짐)")
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as e:
+            print(f"[GenAI 오류] 타임아웃: {e}")
             return _unavailable("GenAI 서버 응답 시간 초과")
         except httpx.HTTPStatusError as e:
+            print(f"[GenAI 오류] HTTP {e.response.status_code}: {e.response.text[:200]}")
             if e.response.status_code == 503:
                 return _unavailable("GenAI 서버 일시 중단 (Render suspended)")
             return _unavailable(f"GenAI 서버 오류: HTTP {e.response.status_code}")
         except RuntimeError as e:
+            print(f"[GenAI 오류] 런타임: {e}")
             return _unavailable(str(e))
         except Exception as e:
+            print(f"[GenAI 오류] 알 수 없는 오류: {type(e).__name__}: {e}")
             return _unavailable(f"알 수 없는 오류: {str(e)}")
 
 
