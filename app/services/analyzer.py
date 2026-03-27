@@ -85,7 +85,7 @@ async def enrich_article(
             data = response.json()
 
             # 디버그: 실제 GenAI 응답 구조 확인
-            print(f"[GenAI 응답] keys={list(data.keys())} sentiment={data.get('sentiment')} summary_sample={data.get('summary_3lines', [])[:1]}")
+            print(f"[GenAI 응답 전체] {data}")
 
             sentiment = data.get("sentiment")
             mixed = data.get("mixed_flags")
