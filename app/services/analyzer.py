@@ -80,6 +80,7 @@ async def enrich_article(
             if published_at:
                 payload["published_at"] = published_at
 
+            print(f"[GenAI 요청] news_id={news_id[:30]} title={title[:50]} text_len={len(payload.get('text',''))}")
             response = await get_client().post("/api/v1/articles/enrich", json=payload)
             response.raise_for_status()
             data = response.json()
