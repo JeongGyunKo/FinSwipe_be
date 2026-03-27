@@ -96,8 +96,9 @@ def save_news_to_db(articles: list[dict]) -> dict:
         return {"saved": 0, "skipped": skipped}
 
     try:
+        # ignore_duplicates=True: 이미 존재하는 기사는 완전히 스킵 (분석 데이터 보호)
         supabase_admin.table("news_articles").upsert(
-            valid, on_conflict="source_url"
+            valid, on_conflict="source_url", ignore_duplicates=True
         ).execute()
         return {"saved": len(valid), "skipped": skipped}
     except Exception as e:
