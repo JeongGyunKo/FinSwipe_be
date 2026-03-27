@@ -77,10 +77,11 @@ async def enrich_article(
                 payload["text"] = content
             if tickers:
                 payload["ticker"] = tickers
-            if published_at:
-                payload["published_at"] = published_at
+            # published_at 임시 제외 (500 에러 원인 진단)
+            # if published_at:
+            #     payload["published_at"] = published_at
 
-            print(f"[GenAI 요청] news_id={news_id[:30]} title={title[:50]} text_len={len(payload.get('text',''))}")
+            print(f"[GenAI 요청] news_id={news_id[:30]} title={title[:50]} text_len={len(payload.get('text',''))} keys={list(payload.keys())}")
             response = await get_client().post("/api/v1/articles/enrich", json=payload)
             response.raise_for_status()
             data = response.json()
@@ -165,7 +166,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
 
     tasks = [
         enrich_article(
-            news_id=str(a.get("id") or a.get("link") or ""),
+            news_id=str(a.get("link") or a.get("source_url") or a.get("id") or ""),
             title=a.get("title") or a.get("headline") or "",
             link=a.get("link") or a.get("source_url") or "",
             content=_build_text(a),
