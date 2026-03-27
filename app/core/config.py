@@ -8,7 +8,7 @@ class Settings(BaseSettings):
 
     finlight_api_key: str
 
-    genai_url: str = "https://fin-ft1a.onrender.com"
+    genai_url: str = "https://finswipe.zeabur.app"
     genai_user: str
     genai_password: str
 
