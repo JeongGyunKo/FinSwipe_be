@@ -2,7 +2,7 @@ import asyncio
 import httpx
 from app.core.config import settings
 
-# GenAI 서버 동시 요청 제한 (1: "Already borrowed" 방지)
+# GenAI 서버 동시 요청 제한 (sentiment 모델 동시 접근 불가 → 1로 고정)
 _semaphore = asyncio.Semaphore(1)
 
 # 앱 전체에서 재사용할 클라이언트 (연결 풀)
@@ -21,7 +21,7 @@ async def init_client() -> None:
     _client = httpx.AsyncClient(
         base_url=settings.genai_url,
         auth=(settings.genai_user, settings.genai_password),
-        timeout=httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=5.0),
+        timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=5.0),
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
     )
 
@@ -84,9 +84,6 @@ async def enrich_article(
             response.raise_for_status()
             data = response.json()
 
-            # 디버그: 실제 GenAI 응답 구조 확인
-            print(f"[GenAI 응답] keys={list(data.keys())} sentiment={data.get('sentiment')} summary_sample={data.get('summary_3lines', [])[:1]}")
-
             sentiment = data.get("sentiment")
             mixed = data.get("mixed_flags")
 
@@ -99,18 +96,11 @@ async def enrich_article(
                     "confidence": sentiment.get("confidence"),
                 }
 
-            # summary_3lines에서 text 키 없으면 안전하게 스킵
+            # summary_3lines에서 text 또는 content 키로 추출
             summary_3lines = [
-                s["text"] for s in data.get("summary_3lines", [])
-                if isinstance(s, dict) and "text" in s
+                s.get("text") or s.get("content", "") for s in data.get("summary_3lines", [])
+                if isinstance(s, dict) and (s.get("text") or s.get("content"))
             ]
-
-            # text 키가 없는 경우 content 키도 시도
-            if not summary_3lines:
-                summary_3lines = [
-                    s.get("content", s.get("text", "")) for s in data.get("summary_3lines", [])
-                    if isinstance(s, dict) and (s.get("content") or s.get("text"))
-                ]
 
             return {
                 "status": data.get("status"),

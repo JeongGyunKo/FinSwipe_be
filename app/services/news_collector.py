@@ -85,6 +85,7 @@ def save_news_to_db(articles: list[dict]) -> dict:
             "headline": article["title"],
             "summary": article.get("summary", ""),
             "source_url": article["link"],
+            "content": article.get("content") or None,
             "categories": article.get("categories", []),
             "countries": article.get("countries", []),
             "is_paywalled": False,
@@ -95,8 +96,9 @@ def save_news_to_db(articles: list[dict]) -> dict:
         return {"saved": 0, "skipped": skipped}
 
     try:
+        # ignore_duplicates=True: 이미 존재하는 기사는 완전히 스킵 (분석 데이터 보호)
         supabase_admin.table("news_articles").upsert(
-            valid, on_conflict="source_url"
+            valid, on_conflict="source_url", ignore_duplicates=True
         ).execute()
         return {"saved": len(valid), "skipped": skipped}
     except Exception as e:
@@ -129,19 +131,40 @@ async def analyze_and_update(articles: list[dict]) -> None:
                 "summary_3lines": enrichment.get("summary_3lines", []),
             })
 
-        # 배치 upsert로 한번에 업데이트
-        if updates:
+        # 개별 update (upsert는 headline NOT NULL 제약 위반으로 실패)
+        failed = 0
+        for u in updates:
             try:
-                supabase_admin.table("news_articles").upsert(
-                    updates, on_conflict="source_url"
-                ).execute()
+                supabase_admin.table("news_articles").update({
+                    "sentiment_label": u["sentiment_label"],
+                    "sentiment_score": u["sentiment_score"],
+                    "summary_3lines": u["summary_3lines"],
+                }).eq("source_url", u["source_url"]).execute()
             except Exception as e:
-                print(f"[백그라운드] 배치 업데이트 실패: {e}")
+                failed += 1
+                print(f"[백그라운드] 업데이트 실패 ({u['source_url'][:50]}): {e}")
+        if failed:
+            print(f"[백그라운드] {failed}개 업데이트 실패")
 
         print(f"[백그라운드] GenAI 분석 완료 → {len(updates)}개 업데이트")
 
     except Exception as e:
         print(f"[백그라운드] 분석 파이프라인 오류: {type(e).__name__}: {e}")
+
+
+def cleanup_old_content() -> None:
+    """24시간 지난 기사 원문 삭제 (요약본은 유지)"""
+    try:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        result = supabase_admin.table("news_articles")\
+            .update({"content": None})\
+            .lt("created_at", cutoff)\
+            .not_.is_("content", "null")\
+            .execute()
+        print(f"[정리] 24시간 이상 된 원문 삭제 완료")
+    except Exception as e:
+        print(f"[정리] 원문 삭제 실패: {e}")
 
 
 async def collect_market_news() -> dict:
