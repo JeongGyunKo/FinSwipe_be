@@ -1,44 +1,76 @@
+import asyncio
 import httpx
-from datetime import datetime, timezone
 from app.core.config import settings
 from app.core.supabase import supabase_admin
 
-FINNHUB_BASE_URL = "https://finnhub.io/api/v1"
+FINLIGHT_BASE_URL = "https://api.finlight.me"
+
+# Finlight 전용 클라이언트 (연결 풀 재사용)
+_finlight_client: httpx.AsyncClient | None = None
 
 
-async def fetch_market_news() -> list:
-    """Finnhub에서 일반 시장 뉴스 가져오기"""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(
-            f"{FINNHUB_BASE_URL}/news",
-            params={"category": "general", "token": settings.finnhub_api_key}
+def get_finlight_client() -> httpx.AsyncClient:
+    global _finlight_client
+    if _finlight_client is None:
+        _finlight_client = httpx.AsyncClient(
+            base_url=FINLIGHT_BASE_URL,
+            headers={"X-API-KEY": settings.finlight_api_key},
+            timeout=20.0,
         )
-        response.raise_for_status()
-        return response.json()
+    return _finlight_client
 
 
-async def fetch_company_news(ticker: str) -> list:
-    """특정 종목 뉴스 가져오기"""
-    from datetime import date, timedelta
-    today = date.today()
-    week_ago = today - timedelta(days=7)
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(
-            f"{FINNHUB_BASE_URL}/company-news",
-            params={
-                "symbol": ticker,
-                "from": week_ago.isoformat(),
-                "to": today.isoformat(),
-                "token": settings.finnhub_api_key
+async def fetch_news_from_finlight(query: str = "stock market finance", page_size: int = 50) -> list[dict]:
+    """Finlight에서 새 기사만 수집"""
+    try:
+        response = await get_finlight_client().post(
+            "/v2/articles",
+            json={
+                "query": query,
+                "language": "en",
+                "pageSize": page_size,
+                "includeContent": True,
             }
         )
         response.raise_for_status()
-        return response.json()
+        articles = response.json().get("articles", [])
+    except httpx.HTTPStatusError as e:
+        print(f"[Finlight 오류] HTTP {e.response.status_code}: {e.response.text[:200]}")
+        return []
+    except httpx.TimeoutException:
+        print("[Finlight 오류] 응답 시간 초과")
+        return []
+    except httpx.ConnectError as e:
+        print(f"[Finlight 오류] 연결 실패: {e}")
+        return []
+    except Exception as e:
+        print(f"[Finlight 오류] {type(e).__name__}: {e}")
+        return []
+
+    # DB에 없는 새 기사만 필터링
+    links = [a["link"] for a in articles if a.get("link")]
+    new_links = _filter_new_links(links)
+    return [a for a in articles if a.get("link") in new_links]
 
 
-def save_news_to_db(articles: list) -> dict:
-    """뉴스 DB에 배치 저장 (중복 방지 upsert)"""
+def _filter_new_links(links: list[str]) -> set[str]:
+    """DB에 없는 링크만 반환"""
+    if not links:
+        return set()
+    try:
+        result = supabase_admin.table("news_articles")\
+            .select("source_url")\
+            .in_("source_url", links)\
+            .execute()
+        existing = {row["source_url"] for row in result.data}
+        return set(links) - existing
+    except Exception as e:
+        print(f"기존 기사 조회 실패: {e}")
+        return set(links)
+
+
+def save_news_to_db(articles: list[dict]) -> dict:
+    """뉴스 DB 배치 저장 (본문 제외)"""
     if not articles:
         return {"saved": 0, "skipped": 0}
 
@@ -46,18 +78,17 @@ def save_news_to_db(articles: list) -> dict:
     skipped = 0
 
     for article in articles:
-        if not article.get("url") or not article.get("headline"):
+        if not article.get("link") or not article.get("title"):
             skipped += 1
             continue
         valid.append({
-            "headline": article.get("headline", ""),
+            "headline": article["title"],
             "summary": article.get("summary", ""),
-            "source_url": article["url"],
-            "tickers": article.get("related", "").split(",") if article.get("related") else [],
+            "source_url": article["link"],
+            "categories": article.get("categories", []),
+            "countries": article.get("countries", []),
             "is_paywalled": False,
-            "published_at": datetime.fromtimestamp(
-                article.get("datetime", 0), tz=timezone.utc
-            ).isoformat()
+            "published_at": article.get("publishDate"),
         })
 
     if not valid:
@@ -65,8 +96,7 @@ def save_news_to_db(articles: list) -> dict:
 
     try:
         supabase_admin.table("news_articles").upsert(
-            valid,
-            on_conflict="source_url"
+            valid, on_conflict="source_url"
         ).execute()
         return {"saved": len(valid), "skipped": skipped}
     except Exception as e:
@@ -74,10 +104,63 @@ def save_news_to_db(articles: list) -> dict:
         return {"saved": 0, "skipped": skipped + len(valid)}
 
 
-async def collect_market_news():
-    """전체 뉴스 수집 파이프라인"""
+async def analyze_and_update(articles: list[dict]) -> None:
+    """백그라운드에서 GenAI 분석 후 DB 업데이트"""
+    from app.services.analyzer import analyze_news_batch
+
+    if not articles:
+        return
+
+    try:
+        print(f"[백그라운드] GenAI 분석 시작 → {len(articles)}개")
+        enriched = await analyze_news_batch(articles)
+
+        updates = []
+        for article in enriched:
+            enrichment = article.get("enrichment") or {}
+            sentiment = enrichment.get("sentiment")
+            link = article.get("link") or article.get("source_url")
+            if not link:
+                continue
+            updates.append({
+                "source_url": link,
+                "sentiment_label": sentiment.get("label") if isinstance(sentiment, dict) else None,
+                "sentiment_score": sentiment.get("score") if isinstance(sentiment, dict) else None,
+                "summary_3lines": enrichment.get("summary_3lines", []),
+            })
+
+        # 배치 upsert로 한번에 업데이트
+        if updates:
+            try:
+                supabase_admin.table("news_articles").upsert(
+                    updates, on_conflict="source_url"
+                ).execute()
+            except Exception as e:
+                print(f"[백그라운드] 배치 업데이트 실패: {e}")
+
+        print(f"[백그라운드] GenAI 분석 완료 → {len(updates)}개 업데이트")
+
+    except Exception as e:
+        print(f"[백그라운드] 분석 파이프라인 오류: {type(e).__name__}: {e}")
+
+
+async def collect_market_news() -> dict:
+    """뉴스 수집 파이프라인 - 수집/저장 즉시 반환, 분석은 백그라운드"""
     print("뉴스 수집 시작...")
-    articles = await fetch_market_news()
-    result = save_news_to_db(articles)
-    print(f"수집 완료 → 저장: {result['saved']}개, 스킵: {result['skipped']}개")
-    return result
+    new_articles = await fetch_news_from_finlight()
+
+    if not new_articles:
+        print("새 기사 없음 - 수집 종료")
+        return {"saved": 0, "skipped": 0, "analyzing": 0}
+
+    result = save_news_to_db(new_articles)
+    print(f"저장 완료 → {result['saved']}개 저장, {result['skipped']}개 스킵")
+
+    if result["saved"] > 0:
+        task = asyncio.create_task(analyze_and_update(new_articles))
+        task.add_done_callback(
+            lambda t: print(f"[백그라운드] 태스크 오류: {t.exception()}") if t.exception() else None
+        )
+        print(f"[백그라운드] GenAI 분석 예약 → {len(new_articles)}개")
+
+    return {**result, "analyzing": len(new_articles) if result["saved"] > 0 else 0}
