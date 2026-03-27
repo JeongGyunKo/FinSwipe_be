@@ -136,14 +136,25 @@ async def enrich_article(
 def _build_text(article: dict) -> str | None:
     """
     GenAI(XAI) 분석용 텍스트 구성.
-    전략: headline + Finlight summary 사용 (짧은 텍스트 → XAI 빠름)
-    전체 원문(content)은 DB에만 저장하고 GenAI에 보내지 않음.
-    이유: 원문 2,500자 전송 시 XAI가 300~400초 걸려 타임아웃 발생
+    우선순위:
+      1) headline + Finlight summary (짧고 빠름)
+      2) summary 없으면 headline + content 앞 800자 (최소 단어 수 확보)
+      3) 둘 다 없으면 headline만
+    전체 원문(content)은 DB에 저장하되 GenAI에는 800자까지만 전송.
     """
-    title = article.get("title", article.get("headline", ""))
-    summary = article.get("summary", "")
-    combined = f"{title}. {summary}".strip() if summary else title.strip()
-    return combined if combined else None
+    title = article.get("title", article.get("headline", "")).strip()
+    summary = (article.get("summary") or "").strip()
+    content = (article.get("content") or "").strip()
+
+    if summary:
+        combined = f"{title}. {summary}"
+    elif content:
+        # summary 없으면 content 앞 800자로 대체 (XAI 최대 ~15초 소요)
+        combined = f"{title}. {content[:800]}"
+    else:
+        combined = title
+
+    return combined.strip() if combined.strip() else None
 
 
 def _unavailable(reason: str) -> dict:
