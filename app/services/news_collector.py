@@ -129,14 +129,20 @@ async def analyze_and_update(articles: list[dict]) -> None:
                 "summary_3lines": enrichment.get("summary_3lines", []),
             })
 
-        # 배치 upsert로 한번에 업데이트
-        if updates:
+        # 개별 update (upsert는 headline NOT NULL 제약 위반으로 실패)
+        failed = 0
+        for u in updates:
             try:
-                supabase_admin.table("news_articles").upsert(
-                    updates, on_conflict="source_url"
-                ).execute()
+                supabase_admin.table("news_articles").update({
+                    "sentiment_label": u["sentiment_label"],
+                    "sentiment_score": u["sentiment_score"],
+                    "summary_3lines": u["summary_3lines"],
+                }).eq("source_url", u["source_url"]).execute()
             except Exception as e:
-                print(f"[백그라운드] 배치 업데이트 실패: {e}")
+                failed += 1
+                print(f"[백그라운드] 업데이트 실패 ({u['source_url'][:50]}): {e}")
+        if failed:
+            print(f"[백그라운드] {failed}개 업데이트 실패")
 
         print(f"[백그라운드] GenAI 분석 완료 → {len(updates)}개 업데이트")
 
