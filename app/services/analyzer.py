@@ -118,7 +118,8 @@ async def enrich_article(
             print(f"[GenAI 오류] 타임아웃: {e}")
             return _unavailable("GenAI 서버 응답 시간 초과")
         except httpx.HTTPStatusError as e:
-            print(f"[GenAI 오류] HTTP {e.response.status_code}")
+            body = e.response.text[:300] if e.response.text else "(no body)"
+            print(f"[GenAI 오류] HTTP {e.response.status_code} | {body}")
             if e.response.status_code == 503:
                 return _unavailable("GenAI 서버 일시 중단")
             return _unavailable(f"GenAI 서버 오류: HTTP {e.response.status_code}")
