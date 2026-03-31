@@ -87,15 +87,19 @@ async def fetch_news_from_finlight() -> list[dict]:
 
 
 def _filter_new_links(links: list[str]) -> set[str]:
-    """DB에 없는 링크만 반환"""
+    """DB에 없는 링크만 반환 (청크 단위로 조회)"""
     if not links:
         return set()
+    existing = set()
+    chunk_size = 50
     try:
-        result = supabase_admin.table("news_articles")\
-            .select("source_url")\
-            .in_("source_url", links)\
-            .execute()
-        existing = {row["source_url"] for row in result.data}
+        for i in range(0, len(links), chunk_size):
+            chunk = links[i:i + chunk_size]
+            result = supabase_admin.table("news_articles")\
+                .select("source_url")\
+                .in_("source_url", chunk)\
+                .execute()
+            existing.update(row["source_url"] for row in result.data)
         return set(links) - existing
     except Exception as e:
         print(f"기존 기사 조회 실패: {e}")
