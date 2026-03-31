@@ -5,6 +5,18 @@ from app.core.supabase import supabase_admin
 
 FINLIGHT_BASE_URL = "https://api.finlight.me"
 
+# 다양한 쿼리로 content 있는 기사 최대화
+COLLECTION_QUERIES = [
+    "stock market earnings revenue",
+    "cryptocurrency bitcoin ethereum",
+    "Federal Reserve interest rates inflation",
+    "tech stocks Apple Microsoft Google",
+    "oil energy commodities",
+    "IPO merger acquisition",
+    "S&P 500 nasdaq dow jones",
+    "forex dollar economy",
+]
+
 # Finlight 전용 클라이언트 (연결 풀 재사용)
 _finlight_client: httpx.AsyncClient | None = None
 
@@ -20,8 +32,8 @@ def get_finlight_client() -> httpx.AsyncClient:
     return _finlight_client
 
 
-async def fetch_news_from_finlight(query: str = "stock market finance", page_size: int = 50) -> list[dict]:
-    """Finlight에서 새 기사만 수집"""
+async def _fetch_single_query(query: str, page_size: int = 50) -> list[dict]:
+    """단일 쿼리로 Finlight 기사 수집"""
     try:
         response = await get_finlight_client().post(
             "/v2/articles",
@@ -33,24 +45,39 @@ async def fetch_news_from_finlight(query: str = "stock market finance", page_siz
             }
         )
         response.raise_for_status()
-        articles = response.json().get("articles", [])
+        return response.json().get("articles", [])
     except httpx.HTTPStatusError as e:
-        print(f"[Finlight 오류] HTTP {e.response.status_code}: {e.response.text[:200]}")
-        return []
-    except httpx.TimeoutException:
-        print("[Finlight 오류] 응답 시간 초과")
-        return []
-    except httpx.ConnectError as e:
-        print(f"[Finlight 오류] 연결 실패: {e}")
+        print(f"[Finlight 오류] {query[:20]} HTTP {e.response.status_code}")
         return []
     except Exception as e:
-        print(f"[Finlight 오류] {type(e).__name__}: {e}")
+        print(f"[Finlight 오류] {query[:20]} {type(e).__name__}: {e}")
         return []
 
-    # DB에 없는 새 기사만 필터링
-    links = [a["link"] for a in articles if a.get("link")]
+
+async def fetch_news_from_finlight() -> list[dict]:
+    """여러 쿼리 병렬 수집 → content 있는 새 기사만 반환"""
+    results = await asyncio.gather(*[
+        _fetch_single_query(q) for q in COLLECTION_QUERIES
+    ])
+
+    # 중복 제거 (link 기준)
+    seen = set()
+    all_articles = []
+    for batch in results:
+        for a in batch:
+            link = a.get("link")
+            if link and link not in seen:
+                seen.add(link)
+                all_articles.append(a)
+
+    # content 없는 기사 제외
+    with_content = [a for a in all_articles if a.get("content")]
+    print(f"[Finlight] 수집 {len(all_articles)}개 → content 있음 {len(with_content)}개")
+
+    # DB에 없는 새 기사만
+    links = [a["link"] for a in with_content]
     new_links = _filter_new_links(links)
-    return [a for a in articles if a.get("link") in new_links]
+    return [a for a in with_content if a.get("link") in new_links]
 
 
 def _filter_new_links(links: list[str]) -> set[str]:
@@ -153,18 +180,26 @@ async def analyze_and_update(articles: list[dict]) -> None:
 
 
 def cleanup_old_content() -> None:
-    """24시간 지난 기사 원문 삭제 (요약본은 유지)"""
+    """48시간 지난 기사 삭제 + content NULL 기사 삭제"""
     try:
         from datetime import datetime, timezone, timedelta
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-        result = supabase_admin.table("news_articles")\
-            .update({"content": None})\
+
+        # 48시간 지난 기사 삭제
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+        supabase_admin.table("news_articles")\
+            .delete()\
             .lt("created_at", cutoff)\
-            .not_.is_("content", "null")\
             .execute()
-        print(f"[정리] 24시간 이상 된 원문 삭제 완료")
+
+        # content NULL인 기사 삭제 (수집 시 필터링 됐어야 하나 혹시 남은 것 처리)
+        supabase_admin.table("news_articles")\
+            .delete()\
+            .is_("content", "null")\
+            .execute()
+
+        print(f"[정리] 48시간 이상 된 기사 및 content 없는 기사 삭제 완료")
     except Exception as e:
-        print(f"[정리] 원문 삭제 실패: {e}")
+        print(f"[정리] 삭제 실패: {e}")
 
 
 async def collect_market_news() -> dict:
