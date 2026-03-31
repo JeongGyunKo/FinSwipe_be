@@ -32,7 +32,7 @@ def get_finlight_client() -> httpx.AsyncClient:
     return _finlight_client
 
 
-async def _fetch_single_query(query: str, page_size: int = 50) -> list[dict]:
+async def _fetch_single_query(query: str, page_size: int = 100) -> list[dict]:
     """단일 쿼리로 Finlight 기사 수집"""
     try:
         response = await get_finlight_client().post(
