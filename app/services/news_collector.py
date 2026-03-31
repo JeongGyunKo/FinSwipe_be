@@ -119,11 +119,16 @@ def save_news_to_db(articles: list[dict]) -> dict:
             skipped += 1
             continue
         images = article.get("images") or []
+        summary = article.get("summary", "").strip()
+        content = article.get("content") or ""
+        # summary 없으면 content 앞 300자로 대체
+        if not summary and content:
+            summary = content[:300].strip()
         valid.append({
             "headline": article["title"],
-            "summary": article.get("summary", ""),
+            "summary": summary,
             "source_url": article["link"],
-            "content": article.get("content") or None,
+            "content": content or None,
             "image_url": images[0] if images else None,
             "categories": article.get("categories", []),
             "countries": article.get("countries", []),
