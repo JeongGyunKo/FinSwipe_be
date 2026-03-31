@@ -74,6 +74,12 @@ async def fetch_news_from_finlight() -> list[dict]:
     with_content = [a for a in all_articles if a.get("content")]
     print(f"[Finlight] 수집 {len(all_articles)}개 → content 있음 {len(with_content)}개")
 
+    # 첫 기사 필드 디버그
+    if all_articles:
+        sample = all_articles[0]
+        print(f"[Finlight 디버그] 샘플 키: {list(sample.keys())}")
+        print(f"[Finlight 디버그] images={sample.get('images')} image={sample.get('image')} thumbnail={sample.get('thumbnail')}")
+
     # DB에 없는 새 기사만
     links = [a["link"] for a in with_content]
     new_links = _filter_new_links(links)
