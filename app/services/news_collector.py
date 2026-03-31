@@ -108,11 +108,13 @@ def save_news_to_db(articles: list[dict]) -> dict:
         if not article.get("link") or not article.get("title"):
             skipped += 1
             continue
+        images = article.get("images") or []
         valid.append({
             "headline": article["title"],
             "summary": article.get("summary", ""),
             "source_url": article["link"],
             "content": article.get("content") or None,
+            "image_url": images[0] if images else None,
             "categories": article.get("categories", []),
             "countries": article.get("countries", []),
             "is_paywalled": False,
