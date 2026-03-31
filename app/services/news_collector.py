@@ -74,16 +74,12 @@ async def fetch_news_from_finlight() -> list[dict]:
     with_content = [a for a in all_articles if a.get("content")]
     print(f"[Finlight] 수집 {len(all_articles)}개 → content 있음 {len(with_content)}개")
 
-    # 첫 기사 필드 디버그
-    if all_articles:
-        sample = all_articles[0]
-        print(f"[Finlight 디버그] 샘플 키: {list(sample.keys())}")
-        print(f"[Finlight 디버그] images={sample.get('images')} image={sample.get('image')} thumbnail={sample.get('thumbnail')}")
-
     # DB에 없는 새 기사만
     links = [a["link"] for a in with_content]
     new_links = _filter_new_links(links)
-    return [a for a in with_content if a.get("link") in new_links]
+    new_articles = [a for a in with_content if a.get("link") in new_links]
+    print(f"[Finlight] 새 기사 {len(new_articles)}개")
+    return new_articles
 
 
 def _filter_new_links(links: list[str]) -> set[str]:
@@ -107,7 +103,7 @@ def _filter_new_links(links: list[str]) -> set[str]:
 
 
 def save_news_to_db(articles: list[dict]) -> dict:
-    """뉴스 DB 배치 저장 (본문 제외)"""
+    """뉴스 DB 배치 저장"""
     if not articles:
         return {"saved": 0, "skipped": 0}
 
@@ -118,12 +114,15 @@ def save_news_to_db(articles: list[dict]) -> dict:
         if not article.get("link") or not article.get("title"):
             skipped += 1
             continue
+
         images = article.get("images") or []
-        summary = article.get("summary", "").strip()
-        content = article.get("content") or ""
+        summary = (article.get("summary") or "").strip()
+        content = (article.get("content") or "").strip()
+
         # summary 없으면 content 앞 300자로 대체
         if not summary and content:
             summary = content[:300].strip()
+
         valid.append({
             "headline": article["title"],
             "summary": summary,
@@ -140,7 +139,7 @@ def save_news_to_db(articles: list[dict]) -> dict:
         return {"saved": 0, "skipped": skipped}
 
     try:
-        # ignore_duplicates=True: 이미 존재하는 기사는 완전히 스킵 (분석 데이터 보호)
+        # ignore_duplicates=True: 이미 존재하는 기사는 스킵 (분석 데이터 보호)
         supabase_admin.table("news_articles").upsert(
             valid, on_conflict="source_url", ignore_duplicates=True
         ).execute()
@@ -151,7 +150,7 @@ def save_news_to_db(articles: list[dict]) -> dict:
 
 
 async def analyze_and_update(articles: list[dict]) -> None:
-    """백그라운드에서 GenAI 분석 후 DB 업데이트"""
+    """백그라운드에서 GenAI 분석 후 DB 업데이트 (성공한 결과만 저장)"""
     from app.services.analyzer import analyze_news_batch
 
     if not articles:
@@ -161,36 +160,36 @@ async def analyze_and_update(articles: list[dict]) -> None:
         print(f"[백그라운드] GenAI 분석 시작 → {len(articles)}개")
         enriched = await analyze_news_batch(articles)
 
-        updates = []
+        updated = 0
+        failed = 0
+        skipped = 0
+
         for article in enriched:
             enrichment = article.get("enrichment") or {}
             sentiment = enrichment.get("sentiment")
             link = article.get("link") or article.get("source_url")
-            if not link:
-                continue
-            updates.append({
-                "source_url": link,
-                "sentiment_label": sentiment.get("label") if isinstance(sentiment, dict) else None,
-                "sentiment_score": sentiment.get("score") if isinstance(sentiment, dict) else None,
-                "summary_3lines": enrichment.get("summary_3lines", []),
-            })
 
-        # 개별 update (upsert는 headline NOT NULL 제약 위반으로 실패)
-        failed = 0
-        for u in updates:
+            if not link:
+                skipped += 1
+                continue
+
+            # 감성 분석 실패 시 DB 업데이트 안 함 (기존 데이터 보호)
+            if not isinstance(sentiment, dict):
+                skipped += 1
+                continue
+
             try:
                 supabase_admin.table("news_articles").update({
-                    "sentiment_label": u["sentiment_label"],
-                    "sentiment_score": u["sentiment_score"],
-                    "summary_3lines": u["summary_3lines"],
-                }).eq("source_url", u["source_url"]).execute()
+                    "sentiment_label": sentiment.get("label"),
+                    "sentiment_score": sentiment.get("score"),
+                    "summary_3lines": enrichment.get("summary_3lines", []),
+                }).eq("source_url", link).execute()
+                updated += 1
             except Exception as e:
                 failed += 1
-                print(f"[백그라운드] 업데이트 실패 ({u['source_url'][:50]}): {e}")
-        if failed:
-            print(f"[백그라운드] {failed}개 업데이트 실패")
+                print(f"[백그라운드] 업데이트 실패 ({link[:50]}): {e}")
 
-        print(f"[백그라운드] GenAI 분석 완료 → {len(updates)}개 업데이트")
+        print(f"[백그라운드] 완료 → 성공 {updated}개 / 실패 {failed}개 / 분석불가 {skipped}개")
 
     except Exception as e:
         print(f"[백그라운드] 분석 파이프라인 오류: {type(e).__name__}: {e}")
@@ -208,13 +207,13 @@ def cleanup_old_content() -> None:
             .lt("created_at", cutoff)\
             .execute()
 
-        # content NULL인 기사 삭제 (수집 시 필터링 됐어야 하나 혹시 남은 것 처리)
+        # content NULL인 기사 삭제
         supabase_admin.table("news_articles")\
             .delete()\
             .is_("content", "null")\
             .execute()
 
-        print(f"[정리] 48시간 이상 된 기사 및 content 없는 기사 삭제 완료")
+        print("[정리] 48시간 이상 된 기사 및 content 없는 기사 삭제 완료")
     except Exception as e:
         print(f"[정리] 삭제 실패: {e}")
 
@@ -236,6 +235,6 @@ async def collect_market_news() -> dict:
         task.add_done_callback(
             lambda t: print(f"[백그라운드] 태스크 오류: {t.exception()}") if t.exception() else None
         )
-        print(f"[백그라운드] GenAI 분석 예약 → {len(new_articles)}개")
+        print(f"[백그라운드] GenAI 분석 예약 → {result['saved']}개")
 
-    return {**result, "analyzing": len(new_articles) if result["saved"] > 0 else 0}
+    return {**result, "analyzing": result["saved"]}

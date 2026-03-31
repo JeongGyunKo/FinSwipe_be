@@ -59,11 +59,10 @@ async def enrich_article(
     link: str,
     content: str | None = None,
     tickers: list[str] | None = None,
-    published_at: str | None = None,
 ) -> dict:
     """
     GenAI 서버로 기사 분석 요청.
-    content(본문 텍스트)가 있으면 직접 전달 → 크롤링 없이 분석.
+    content(분석용 텍스트)가 있으면 직접 전달 → 크롤링 없이 분석.
     서버 꺼짐 / 오류 시 unavailable 반환.
     """
     async with _semaphore:
@@ -77,11 +76,7 @@ async def enrich_article(
                 payload["text"] = content
             if tickers:
                 payload["ticker"] = tickers
-            # published_at 임시 제외 (500 에러 원인 진단)
-            # if published_at:
-            #     payload["published_at"] = published_at
 
-            print(f"[GenAI 요청] news_id={news_id[:30]} title={title[:50]} text_len={len(payload.get('text',''))} keys={list(payload.keys())}")
             response = await get_client().post("/api/v1/articles/enrich", json=payload)
             response.raise_for_status()
             data = response.json()
@@ -89,7 +84,6 @@ async def enrich_article(
             sentiment = data.get("sentiment")
             mixed = data.get("mixed_flags")
 
-            # sentiment가 None이면 전체 블록을 None으로 처리
             sentiment_block = None
             if isinstance(sentiment, dict):
                 sentiment_block = {
@@ -98,7 +92,6 @@ async def enrich_article(
                     "confidence": sentiment.get("confidence"),
                 }
 
-            # summary_3lines에서 text 또는 content 키로 추출
             summary_3lines = [
                 s.get("text") or s.get("content", "") for s in data.get("summary_3lines", [])
                 if isinstance(s, dict) and (s.get("text") or s.get("content"))
@@ -137,8 +130,8 @@ def _build_text(article: dict) -> str | None:
     """
     GenAI(XAI) 분석용 텍스트 구성.
     우선순위:
-      1) headline + Finlight summary (짧고 빠름)
-      2) summary 없으면 headline + content 앞 800자 (최소 단어 수 확보)
+      1) headline + summary (짧고 빠름, XAI ~10초)
+      2) summary 없으면 headline + content 앞 800자 (XAI ~15초)
       3) 둘 다 없으면 headline만
     전체 원문(content)은 DB에 저장하되 GenAI에는 800자까지만 전송.
     """
@@ -149,7 +142,6 @@ def _build_text(article: dict) -> str | None:
     if summary:
         combined = f"{title}. {summary}"
     elif content:
-        # summary 없으면 content 앞 800자로 대체 (XAI 최대 ~15초 소요)
         combined = f"{title}. {content[:800]}"
     else:
         combined = title
@@ -169,7 +161,7 @@ def _unavailable(reason: str) -> dict:
 
 
 async def analyze_news_batch(articles: list[dict]) -> list[dict]:
-    """뉴스 목록 병렬 분석 (서버 꺼져 있어도 결과 반환)"""
+    """뉴스 목록 순차 분석 (semaphore=1 → 직렬 처리)"""
     valid = [
         a for a in articles
         if (a.get("link") or a.get("source_url") or "").startswith("http")
@@ -182,7 +174,6 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
             link=a.get("link") or a.get("source_url") or "",
             content=_build_text(a),
             tickers=a.get("tickers") or None,
-            published_at=a.get("publishDate") or a.get("published_at"),
         )
         for a in valid
     ]
