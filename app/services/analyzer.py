@@ -84,6 +84,9 @@ async def enrich_article(
             sentiment = data.get("sentiment")
             mixed = data.get("mixed_flags")
 
+            if not isinstance(sentiment, dict):
+                print(f"[GenAI 응답] sentiment 없음 | status={data.get('status')} outcome={data.get('outcome')} error={data.get('error')}")
+
             sentiment_block = None
             if isinstance(sentiment, dict):
                 sentiment_block = {
