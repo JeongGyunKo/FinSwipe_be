@@ -1,5 +1,6 @@
 import asyncio
 import httpx
+from urllib.parse import quote
 from app.core.config import settings
 
 _client: httpx.AsyncClient | None = None
@@ -94,7 +95,8 @@ async def fetch_result(news_id: str) -> dict | None:
     분석 결과 조회. completed 상태면 파싱된 결과 반환. 없거나 미완료면 None.
     """
     try:
-        resp = await get_client().get(f"/api/v1/news/{news_id}/result")
+        encoded_id = quote(news_id, safe="")
+        resp = await get_client().get(f"/api/v1/news/{encoded_id}/result")
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
