@@ -82,24 +82,33 @@ async def enrich_article(
             # Step 2: 워커 트리거
             await get_client().post("/api/v1/jobs/process-next")
 
-            # Step 3: 결과 폴링 (최대 15회 × 3초 = 45초)
-            for attempt in range(15):
+            # Step 3: 결과 폴링 (최대 20회 × 3초 = 60초)
+            # 404 = 아직 처리 안 됨 → process-next 재호출로 큐 드레인
+            for attempt in range(20):
                 await asyncio.sleep(3)
                 result_resp = await get_client().get(f"/api/v1/news/{news_id}/result")
+
+                if result_resp.status_code == 404:
+                    # 아직 처리 안 됨 → 워커 재트리거
+                    await get_client().post("/api/v1/jobs/process-next")
+                    continue
+
                 result_resp.raise_for_status()
                 data = result_resp.json()
-
                 state = data.get("processing_state")
+
                 if state == "completed":
                     return _parse_result(data.get("result") or {})
                 elif state == "failed":
                     err = data.get("error_code") or "unknown"
                     print(f"[GenAI] 처리 실패: {news_id[:50]} | {err}")
                     return _unavailable(f"GenAI 처리 실패: {err}")
-                # queued / processing → 계속 폴링
+                elif state in ("queued", "retry_pending"):
+                    # 큐에 있으나 처리 안 됨 → 워커 재트리거
+                    await get_client().post("/api/v1/jobs/process-next")
 
             print(f"[GenAI] 폴링 타임아웃: {news_id[:50]}")
-            return _unavailable("GenAI 폴링 타임아웃 (45초)")
+            return _unavailable("GenAI 폴링 타임아웃 (60초)")
 
         except httpx.ConnectError as e:
             print(f"[GenAI 오류] 연결 실패: {e}")
