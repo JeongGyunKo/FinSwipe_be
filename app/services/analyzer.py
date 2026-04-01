@@ -98,7 +98,9 @@ async def enrich_article(
                 state = data.get("processing_state")
 
                 if state == "completed":
-                    return _parse_result(data.get("result") or {})
+                    parsed = _parse_result(data.get("result") or {})
+                    print(f"[GenAI 완료] {news_id[:50]} sentiment={parsed.get('sentiment')}")
+                    return parsed
                 elif state == "failed":
                     err = data.get("error_code") or "unknown"
                     print(f"[GenAI] 처리 실패: {news_id[:50]} | {err}")
