@@ -2,9 +2,6 @@ import asyncio
 import httpx
 from app.core.config import settings
 
-# GenAI 서버 동시 요청 제한 (1로 고정)
-_semaphore = asyncio.Semaphore(1)
-
 _client: httpx.AsyncClient | None = None
 
 
@@ -47,88 +44,67 @@ async def check_genai_health() -> dict:
         return {"status": "offline", "reason": str(e)}
 
 
-async def enrich_article(
+async def submit_article(
     news_id: str,
     title: str,
     link: str,
     article_text: str | None = None,
     summary_text: str | None = None,
     tickers: list[str] | None = None,
-) -> dict:
+) -> bool:
+    """기사를 GenAI 큐에 제출. 성공 시 True."""
+    try:
+        payload: dict = {"news_id": news_id, "title": title, "link": link}
+        if article_text:
+            payload["article_text"] = article_text
+        if summary_text:
+            payload["summary_text"] = summary_text
+        if tickers:
+            payload["ticker"] = tickers
+
+        resp = await get_client().post("/api/v1/articles/enrich-text", json=payload)
+        return resp.status_code in (200, 202)
+    except Exception as e:
+        print(f"[GenAI] 제출 실패: {news_id[:60]} | {e}")
+        return False
+
+
+async def drain_queue(max_jobs: int = 600) -> int:
     """
-    GenAI 서버로 기사 분석 요청 (비동기 큐 방식).
-    1) /api/v1/articles/enrich-text 로 제출 → 202
-    2) /api/v1/jobs/process-next 로 워커 트리거
-    3) /api/v1/news/{news_id}/result 폴링 → 완료 시 결과 반환
+    GenAI 큐를 비울 때까지 process-next 반복 호출.
+    processed=False 반환 시 큐 비워짐.
     """
-    async with _semaphore:
+    count = 0
+    for _ in range(max_jobs):
         try:
-            payload: dict = {
-                "news_id": news_id,
-                "title": title,
-                "link": link,
-            }
-            if article_text:
-                payload["article_text"] = article_text
-            if summary_text:
-                payload["summary_text"] = summary_text
-            if tickers:
-                payload["ticker"] = tickers
-
-            # Step 1: 제출
-            submit_resp = await get_client().post("/api/v1/articles/enrich-text", json=payload)
-            submit_resp.raise_for_status()
-
-            # Step 2: 워커 트리거
-            await get_client().post("/api/v1/jobs/process-next")
-
-            # Step 3: 결과 폴링 (최대 20회 × 3초 = 60초)
-            # 404 = 아직 처리 안 됨 → process-next 재호출로 큐 드레인
-            for attempt in range(20):
-                await asyncio.sleep(3)
-                result_resp = await get_client().get(f"/api/v1/news/{news_id}/result")
-
-                if result_resp.status_code == 404:
-                    # 아직 처리 안 됨 → 워커 재트리거
-                    await get_client().post("/api/v1/jobs/process-next")
-                    continue
-
-                result_resp.raise_for_status()
-                data = result_resp.json()
-                state = data.get("processing_state")
-
-                if state == "completed":
-                    parsed = _parse_result(data.get("result") or {})
-                    print(f"[GenAI 완료] {news_id[:50]} sentiment={parsed.get('sentiment')}")
-                    return parsed
-                elif state == "failed":
-                    err = data.get("error_code") or "unknown"
-                    print(f"[GenAI] 처리 실패: {news_id[:50]} | {err}")
-                    return _unavailable(f"GenAI 처리 실패: {err}")
-                elif state in ("queued", "retry_pending"):
-                    # 큐에 있으나 처리 안 됨 → 워커 재트리거
-                    await get_client().post("/api/v1/jobs/process-next")
-
-            print(f"[GenAI] 폴링 타임아웃: {news_id[:50]}")
-            return _unavailable("GenAI 폴링 타임아웃 (60초)")
-
-        except httpx.ConnectError as e:
-            print(f"[GenAI 오류] 연결 실패: {e}")
-            return _unavailable("GenAI 서버 연결 불가")
-        except httpx.TimeoutException:
-            print(f"[GenAI 오류] 타임아웃")
-            return _unavailable("GenAI 서버 응답 시간 초과")
-        except httpx.HTTPStatusError as e:
-            print(f"[GenAI 오류] HTTP {e.response.status_code} | {e.response.text[:200]}")
-            if e.response.status_code == 503:
-                return _unavailable("GenAI 서버 일시 중단")
-            return _unavailable(f"GenAI 오류: HTTP {e.response.status_code}")
-        except RuntimeError as e:
-            print(f"[GenAI 오류] 런타임: {e}")
-            return _unavailable(str(e))
+            resp = await get_client().post("/api/v1/jobs/process-next")
+            data = resp.json()
+            if not data.get("processed", False):
+                break
+            count += 1
+            await asyncio.sleep(2)  # 기사당 평균 처리 시간 대기
         except Exception as e:
-            print(f"[GenAI 오류] {type(e).__name__}: {e}")
-            return _unavailable(str(e))
+            print(f"[GenAI] process-next 오류: {e}")
+            break
+    return count
+
+
+async def fetch_result(news_id: str) -> dict | None:
+    """
+    분석 결과 조회. completed 상태면 파싱된 결과 반환. 없거나 미완료면 None.
+    """
+    try:
+        resp = await get_client().get(f"/api/v1/news/{news_id}/result")
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("processing_state") != "completed":
+            return None
+        return _parse_result(data.get("result") or {})
+    except Exception as e:
+        print(f"[GenAI] 결과 조회 실패: {news_id[:60]} | {e}")
+        return None
 
 
 def _parse_result(result: dict) -> dict:
@@ -171,29 +147,33 @@ def _unavailable(reason: str) -> dict:
 
 
 async def analyze_news_batch(articles: list[dict]) -> list[dict]:
-    """뉴스 목록 순차 분석 (semaphore=1)"""
+    """단일 엔드포인트용 분석 (소량 기사)"""
     valid = [
         a for a in articles
         if (a.get("link") or a.get("source_url") or "").startswith("http")
     ]
 
-    tasks = [
-        enrich_article(
-            news_id=str(a.get("link") or a.get("source_url") or a.get("id") or ""),
+    submitted = []
+    for a in valid:
+        link = a.get("link") or a.get("source_url") or ""
+        ok = await submit_article(
+            news_id=link,
             title=a.get("title") or a.get("headline") or "",
-            link=a.get("link") or a.get("source_url") or "",
+            link=link,
             article_text=(a.get("content") or "").strip() or None,
             summary_text=(a.get("summary") or "").strip() or None,
             tickers=a.get("tickers") or None,
         )
-        for a in valid
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+        submitted.append(ok)
+
+    await drain_queue(max_jobs=len(valid) + 20)
 
     output = []
-    for article, result in zip(valid, results):
-        if isinstance(result, Exception):
-            print(f"[GenAI 오류] 개별 분석 실패: {result}")
-            result = _unavailable(str(result))
+    for article, ok in zip(valid, submitted):
+        if not ok:
+            output.append({**article, "enrichment": _unavailable("제출 실패")})
+            continue
+        link = article.get("link") or article.get("source_url") or ""
+        result = await fetch_result(link) or _unavailable("결과 없음")
         output.append({**article, "enrichment": result})
     return output
