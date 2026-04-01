@@ -79,13 +79,11 @@ async def enrich_article(
 
             response = await get_client().post("/api/v1/articles/enrich", json=payload)
             response.raise_for_status()
+            print(f"[GenAI 응답] status_code={response.status_code} body={response.text[:300]}")
             data = response.json()
 
             sentiment = data.get("sentiment")
             mixed = data.get("mixed_flags")
-
-            if not isinstance(sentiment, dict):
-                print(f"[GenAI 응답] sentiment 없음 | status={data.get('status')} outcome={data.get('outcome')} error={data.get('error')}")
 
             sentiment_block = None
             if isinstance(sentiment, dict):
