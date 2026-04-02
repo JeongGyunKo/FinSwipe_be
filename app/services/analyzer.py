@@ -55,6 +55,8 @@ async def submit_article(
 ) -> bool:
     """기사를 GenAI 큐에 제출. 성공 시 True."""
     try:
+        news_id = news_id.rstrip("/")
+        link = link.rstrip("/")
         payload: dict = {"news_id": news_id, "title": title, "link": link}
         if article_text:
             payload["article_text"] = article_text
@@ -110,6 +112,7 @@ async def fetch_result(news_id: str) -> dict | None:
     분석 결과 조회. completed 상태면 파싱된 결과 반환. 없거나 미완료면 None.
     """
     try:
+        news_id = news_id.rstrip("/")  # GenAI는 trailing slash 없이 저장
         encoded_id = quote(news_id, safe="")
         # httpx base_url 병합 시 %3A 등이 디코딩될 수 있으므로 절대 URL 직접 구성
         base = str(get_client().base_url).rstrip("/")
