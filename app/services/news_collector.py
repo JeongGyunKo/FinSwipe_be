@@ -73,12 +73,14 @@ async def fetch_news_from_finlight() -> list[dict]:
 
     # content 없는 기사 제외
     with_content = [a for a in all_articles if a.get("content")]
-    print(f"[Finlight] 수집 {len(all_articles)}개 → content 있음 {len(with_content)}개")
+    # ticker 없는 기사 제외
+    with_tickers = [a for a in with_content if a.get("companies")]
+    print(f"[Finlight] 수집 {len(all_articles)}개 → content {len(with_content)}개 → ticker 있음 {len(with_tickers)}개")
 
     # DB에 없는 새 기사만
-    links = [a["link"] for a in with_content]
+    links = [a["link"] for a in with_tickers]
     new_links = _filter_new_links(links)
-    new_articles = [a for a in with_content if a.get("link") in new_links]
+    new_articles = [a for a in with_tickers if a.get("link") in new_links]
     print(f"[Finlight] 새 기사 {len(new_articles)}개")
     return new_articles
 
@@ -226,7 +228,13 @@ def cleanup_old_content() -> None:
             .is_("content", "null")\
             .execute()
 
-        print("[정리] 48시간 이상 된 기사 및 content 없는 기사 삭제 완료")
+        # tickers 없는 기사 삭제
+        supabase_admin.table("news_articles")\
+            .delete()\
+            .eq("tickers", "{}")\
+            .execute()
+
+        print("[정리] 48시간 이상 된 기사 및 content/tickers 없는 기사 삭제 완료")
     except Exception as e:
         print(f"[정리] 삭제 실패: {e}")
 
