@@ -1,6 +1,5 @@
 import asyncio
 import httpx
-from urllib.parse import quote
 from app.core.config import settings
 
 _client: httpx.AsyncClient | None = None
@@ -66,98 +65,37 @@ async def submit_article(
             payload["ticker"] = tickers
 
         resp = await get_client().post("/api/v1/articles/enrich-text", json=payload)
-        body = resp.json() if resp.status_code in (200, 202) else {}
-        queued = body.get("queued")
-        state = body.get("processing_state")
-        print(f"[GenAI] submit {news_id[:60]} → status={resp.status_code} queued={queued} state={state}")
         return resp.status_code in (200, 202)
     except Exception as e:
         print(f"[GenAI] 제출 실패: {news_id[:60]} | {e}")
         return False
 
 
-async def drain_queue(target_ids: set[str] | None = None, max_jobs: int = 10000) -> int:
-    """
-    GenAI 큐 처리. target_ids가 주어지면 해당 기사가 모두 완료되면 조기 종료.
-    processed=False 반환 시 큐 비워짐.
-    """
-    count = 0
-    remaining = set(target_ids) if target_ids else None
-    for _ in range(max_jobs):
-        try:
-            resp = await get_client().post("/api/v1/jobs/process-next")
-            data = resp.json()
-            if not data.get("processed", False):
-                break
-            count += 1
-            p_state = data.get("processing_state")
-            p_outcome = data.get("analysis_outcome")
-            p_id = data.get("news_id", "")
-            print(f"[GenAI] process-next #{count}: news_id={p_id[:60]} state={p_state} outcome={p_outcome}")
-            # 우리가 제출한 기사가 처리됐으면 remaining에서 제거
-            if remaining is not None:
-                if p_id:
-                    remaining.discard(p_id)
-                if not remaining:
-                    print(f"[GenAI] 목표 기사 전부 처리 완료, drain 종료 (총 {count}개)")
-                    break
-        except Exception as e:
-            print(f"[GenAI] process-next 오류: {e}")
-            break
-    return count
-
-
-async def fetch_result(news_id: str) -> dict | None:
-    """
-    분석 결과 조회. completed 상태면 파싱된 결과 반환. 없거나 미완료면 None.
-    """
-    try:
-        news_id = news_id.rstrip("/")  # GenAI는 trailing slash 없이 저장
-        encoded_id = quote(news_id, safe="")
-        # httpx base_url 병합 시 %3A 등이 디코딩될 수 있으므로 절대 URL 직접 구성
-        base = str(get_client().base_url).rstrip("/")
-        full_url = f"{base}/api/v1/news/{encoded_id}/result"
-        print(f"[DEBUG] fetch_result URL: {full_url}")
-        resp = await get_client().get(full_url)
-        body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-        print(f"[DEBUG] fetch_result status={resp.status_code} state={body.get('processing_state')} outcome={body.get('result', {}).get('outcome') if body.get('result') else None}")
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("processing_state") != "completed":
-            return None
-        return _parse_result(data.get("result") or {})
-    except Exception as e:
-        print(f"[GenAI] 결과 조회 실패: {news_id[:60]} | {e}")
-        return None
-
-
-def _parse_result(result: dict) -> dict:
-    """ArticleEnrichmentResponse → 우리 포맷으로 변환"""
-    sentiment = result.get("sentiment")
-    sentiment_block = None
-    if isinstance(sentiment, dict):
-        sentiment_block = {
-            "label": sentiment.get("label"),
-            "score": sentiment.get("score"),
-            "confidence": sentiment.get("confidence"),
+def _parse_storage_payload(enrichment: dict) -> dict:
+    """EnrichmentStoragePayload → 우리 포맷으로 변환 (process-next 응답에서 직접)"""
+    sentiment_raw = enrichment.get("sentiment") or {}
+    sentiment = None
+    if sentiment_raw.get("label"):
+        sentiment = {
+            "label": sentiment_raw.get("label"),
+            "score": sentiment_raw.get("score"),
+            "confidence": sentiment_raw.get("confidence"),
         }
 
     summary_3lines = [
-        s.get("text") for s in result.get("summary_3lines", [])
+        s.get("text") for s in enrichment.get("summary_3lines", [])
         if isinstance(s, dict) and s.get("text")
     ]
 
-    mixed = result.get("mixed_flags")
+    mixed = enrichment.get("article_mixed") or {}
 
     return {
-        "status": result.get("status"),
-        "outcome": result.get("outcome"),
-        "sentiment": sentiment_block,
+        "status": enrichment.get("analysis_status"),
+        "outcome": enrichment.get("analysis_outcome"),
+        "sentiment": sentiment,
         "summary_3lines": summary_3lines,
-        "is_mixed": mixed.get("is_mixed") if isinstance(mixed, dict) else None,
-        "error": result.get("error"),
+        "is_mixed": mixed.get("is_mixed"),
+        "error": None,
     }
 
 
@@ -173,14 +111,14 @@ def _unavailable(reason: str) -> dict:
 
 
 async def analyze_news_batch(articles: list[dict]) -> list[dict]:
-    """단일 엔드포인트용 분석 (소량 기사)"""
+    """기사 제출 → process-next로 큐 소진 → 응답에서 직접 결과 수집"""
     valid = [
         a for a in articles
         if (a.get("link") or a.get("source_url") or "").startswith("http")
     ]
 
-    submitted = []
-    submitted_ids: set[str] = set()
+    # 제출
+    submitted_map: dict[str, dict] = {}  # normalized news_id → article
     for a in valid:
         link = (a.get("link") or a.get("source_url") or "").rstrip("/")
         ok = await submit_article(
@@ -191,19 +129,48 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
             summary_text=(a.get("summary") or "").strip() or None,
             tickers=a.get("tickers") or None,
         )
-        submitted.append(ok)
         if ok:
-            submitted_ids.add(link)
+            submitted_map[link] = a
 
-    print(f"[GenAI] 제출 완료 {len(submitted_ids)}개, 큐 처리 시작...")
-    await drain_queue(target_ids=submitted_ids)  # 우리 기사가 처리되면 즉시 종료
+    print(f"[GenAI] 제출 완료 {len(submitted_map)}개, 큐 처리 시작...")
 
+    # process-next 응답에서 직접 결과 수집 (fetch_result 불필요)
+    results: dict[str, dict] = {}
+    remaining = set(submitted_map.keys())
+
+    for i in range(10000):
+        try:
+            resp = await get_client().post("/api/v1/jobs/process-next")
+            data = resp.json()
+            if not data.get("processed", False):
+                print(f"[GenAI] 큐 소진 (총 {i}개 처리)")
+                break
+
+            p_id = (data.get("news_id") or "").rstrip("/")
+            p_outcome = data.get("analysis_outcome")
+            enrichment = data.get("enrichment")
+
+            if p_id in remaining:
+                remaining.discard(p_id)
+                if enrichment and p_outcome in ("success", "partial_success"):
+                    results[p_id] = _parse_storage_payload(enrichment)
+                    print(f"[GenAI] 결과 수집: {p_id[:60]} outcome={p_outcome}")
+                else:
+                    results[p_id] = _unavailable(f"처리 실패: {p_outcome}")
+                    print(f"[GenAI] 실패: {p_id[:60]} outcome={p_outcome}")
+
+                if not remaining:
+                    print(f"[GenAI] 목표 기사 전부 완료 (총 {i+1}개 처리)")
+                    break
+        except Exception as e:
+            print(f"[GenAI] process-next 오류: {e}")
+            break
+
+    # 결과 미수집 기사 처리
     output = []
-    for article, ok in zip(valid, submitted):
-        if not ok:
-            output.append({**article, "enrichment": _unavailable("제출 실패")})
-            continue
-        link = (article.get("link") or article.get("source_url") or "").rstrip("/")
-        result = await fetch_result(link) or _unavailable("결과 없음")
-        output.append({**article, "enrichment": result})
+    for a in valid:
+        link = (a.get("link") or a.get("source_url") or "").rstrip("/")
+        result = results.get(link) or _unavailable("결과 없음")
+        output.append({**a, "enrichment": result})
+
     return output

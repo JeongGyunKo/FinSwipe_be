@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from app.core.supabase import supabase_admin as supabase
 from app.services.news_collector import collect_market_news, analyze_and_update
-from app.services.analyzer import analyze_news_batch, check_genai_health, submit_article, drain_queue, fetch_result, _unavailable
+from app.services.analyzer import analyze_news_batch, check_genai_health, submit_article, _unavailable
 
 router = APIRouter()
 
@@ -56,17 +56,13 @@ async def genai_health():
 @router.post("/analyze")
 async def analyze_single(body: AnalyzeRequest):
     """단일 뉴스 분석 (GenAI 서버 - 요약 + 감성)"""
-    ok = await submit_article(
-        news_id=body.source_url,
-        title=body.headline,
-        link=body.source_url,
-        article_text=body.content or None,
-        tickers=body.tickers or None,
-    )
-    if not ok:
-        return _unavailable("제출 실패")
-    await drain_queue(max_jobs=20)
-    return await fetch_result(body.source_url) or _unavailable("결과 없음")
+    enriched = await analyze_news_batch([{
+        "link": body.source_url,
+        "title": body.headline,
+        "content": body.content or "",
+        "tickers": body.tickers or [],
+    }])
+    return enriched[0].get("enrichment") if enriched else _unavailable("분석 실패")
 
 
 @router.get("/reanalyze")
