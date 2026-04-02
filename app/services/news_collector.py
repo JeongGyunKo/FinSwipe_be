@@ -123,6 +123,9 @@ def save_news_to_db(articles: list[dict]) -> dict:
         if not summary and content:
             summary = content[:300].strip()
 
+        # Finlight tickers 필드 (symbols 또는 tickers)
+        tickers = article.get("tickers") or article.get("symbols") or []
+
         valid.append({
             "headline": article["title"],
             "summary": summary,
@@ -131,6 +134,7 @@ def save_news_to_db(articles: list[dict]) -> dict:
             "image_url": images[0] if images else None,
             "categories": article.get("categories", []),
             "countries": article.get("countries", []),
+            "tickers": tickers,
             "is_paywalled": False,
             "published_at": article.get("publishDate"),
         })

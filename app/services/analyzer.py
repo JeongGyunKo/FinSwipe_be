@@ -156,8 +156,8 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                 remaining.discard(p_id)
                 if enrichment and p_outcome in ("success", "partial_success"):
                     results[p_id] = _parse_storage_payload(enrichment)
-                    xai_keys = list(enrichment.get("xai", {}).keys()) if isinstance(enrichment.get("xai"), dict) else enrichment.get("xai")
-                    print(f"[GenAI] 결과 수집: {p_id[:60]} outcome={p_outcome} xai={xai_keys}")
+                    summary_count = len(enrichment.get("summary_3lines") or [])
+                    print(f"[GenAI] 결과 수집: {p_id[:60]} outcome={p_outcome} summary={summary_count}줄")
                 else:
                     results[p_id] = _unavailable(f"처리 실패: {p_outcome}")
                     print(f"[GenAI] 실패: {p_id[:60]} outcome={p_outcome}")
