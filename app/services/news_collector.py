@@ -73,9 +73,6 @@ async def fetch_news_from_finlight() -> list[dict]:
     # content 없는 기사 제외
     with_content = [a for a in all_articles if a.get("content")]
     print(f"[Finlight] 수집 {len(all_articles)}개 → content 있음 {len(with_content)}개")
-    if with_content:
-        sample = with_content[0]
-        print(f"[Finlight] 샘플 필드: {list(sample.keys())} tickers={sample.get('tickers') or sample.get('symbols')}")
 
     # DB에 없는 새 기사만
     links = [a["link"] for a in with_content]
@@ -126,9 +123,6 @@ def save_news_to_db(articles: list[dict]) -> dict:
         if not summary and content:
             summary = content[:300].strip()
 
-        # Finlight tickers 필드 (symbols 또는 tickers)
-        tickers = article.get("tickers") or article.get("symbols") or []
-
         valid.append({
             "headline": article["title"],
             "summary": summary,
@@ -137,7 +131,6 @@ def save_news_to_db(articles: list[dict]) -> dict:
             "image_url": images[0] if images else None,
             "categories": article.get("categories", []),
             "countries": article.get("countries", []),
-            "tickers": tickers,
             "is_paywalled": False,
             "published_at": article.get("publishDate"),
         })

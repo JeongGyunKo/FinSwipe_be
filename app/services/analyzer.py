@@ -82,10 +82,14 @@ def _parse_storage_payload(enrichment: dict) -> dict:
             "confidence": sentiment_raw.get("confidence"),
         }
 
-    summary_3lines = [
-        s.get("text") for s in enrichment.get("summary_3lines", [])
-        if isinstance(s, dict) and s.get("text")
-    ]
+    raw_summary = enrichment.get("summary_3lines") or []
+    print(f"[DEBUG] summary_3lines raw: {raw_summary}")
+    summary_3lines = []
+    for s in raw_summary:
+        if isinstance(s, str):
+            summary_3lines.append(s)
+        elif isinstance(s, dict):
+            summary_3lines.append(s.get("text") or s.get("line") or s.get("content") or "")
 
     mixed = enrichment.get("article_mixed") or {}
     xai = enrichment.get("xai") or None
