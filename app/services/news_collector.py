@@ -74,8 +74,6 @@ async def fetch_news_from_finlight() -> list[dict]:
     # content 없는 기사 제외
     with_content = [a for a in all_articles if a.get("content")]
     print(f"[Finlight] 수집 {len(all_articles)}개 → content 있음 {len(with_content)}개")
-    if with_content:
-        print(f"[Finlight] 전체 필드: {with_content[0]}")
 
     # DB에 없는 새 기사만
     links = [a["link"] for a in with_content]
@@ -121,6 +119,8 @@ def save_news_to_db(articles: list[dict]) -> dict:
         images = article.get("images") or []
         summary = (article.get("summary") or "").strip()
         content = (article.get("content") or "").strip()
+        companies = article.get("companies") or []
+        tickers = [c["ticker"] for c in companies if c.get("ticker")]
 
         # summary 없으면 content 앞 300자로 대체
         if not summary and content:
@@ -134,6 +134,7 @@ def save_news_to_db(articles: list[dict]) -> dict:
             "image_url": images[0] if images else None,
             "categories": article.get("categories", []),
             "countries": article.get("countries", []),
+            "tickers": tickers,
             "is_paywalled": False,
             "published_at": article.get("publishDate"),
         })
