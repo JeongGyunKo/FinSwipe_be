@@ -83,7 +83,6 @@ def _parse_storage_payload(enrichment: dict) -> dict:
         }
 
     raw_summary = enrichment.get("summary_3lines") or []
-    print(f"[DEBUG] summary_3lines raw: {raw_summary}")
     summary_3lines = []
     for s in raw_summary:
         if isinstance(s, str):
@@ -160,8 +159,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                 remaining.discard(p_id)
                 if enrichment and p_outcome in ("success", "partial_success"):
                     results[p_id] = _parse_storage_payload(enrichment)
-                    summary_count = len(enrichment.get("summary_3lines") or [])
-                    print(f"[GenAI] 결과 수집: {p_id[:60]} outcome={p_outcome} summary={summary_count}줄")
+                    print(f"[GenAI] 결과 수집: {p_id[:60]} outcome={p_outcome}")
                 else:
                     results[p_id] = _unavailable(f"처리 실패: {p_outcome}")
                     print(f"[GenAI] 실패: {p_id[:60]} outcome={p_outcome}")

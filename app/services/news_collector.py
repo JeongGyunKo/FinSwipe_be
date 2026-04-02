@@ -192,8 +192,7 @@ async def analyze_and_update(articles: list[dict]) -> None:
                     # trailing slash 버전으로 재시도
                     res2 = supabase_admin.table("news_articles").update(update_data).eq("source_url", link + "/").execute()
                     rows = len(res2.data) if res2.data else 0
-                summary_val = enrichment.get("summary_3lines", [])
-                print(f"[DB] 업데이트: {link[:60]} → label={sentiment.get('label')} rows={rows} summary_count={len(summary_val)} summary_sample={str(summary_val[0])[:40] if summary_val else 'EMPTY'}")
+                print(f"[DB] 업데이트: {link[:60]} → label={sentiment.get('label')} rows={rows}")
                 updated += 1
             except Exception as e:
                 failed += 1
