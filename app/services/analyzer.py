@@ -96,7 +96,12 @@ async def fetch_result(news_id: str) -> dict | None:
     """
     try:
         encoded_id = quote(news_id, safe="")
-        resp = await get_client().get(f"/api/v1/news/{encoded_id}/result")
+        # httpx base_url 병합 시 %3A 등이 디코딩될 수 있으므로 절대 URL 직접 구성
+        base = str(get_client().base_url).rstrip("/")
+        full_url = f"{base}/api/v1/news/{encoded_id}/result"
+        print(f"[DEBUG] fetch_result: {full_url[:100]}")
+        resp = await get_client().get(full_url)
+        print(f"[DEBUG] fetch_result status={resp.status_code} state={resp.json().get('processing_state') if resp.status_code == 200 else 'N/A'}")
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
