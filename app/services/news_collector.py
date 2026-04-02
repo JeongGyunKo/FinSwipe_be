@@ -73,6 +73,9 @@ async def fetch_news_from_finlight() -> list[dict]:
     # content 없는 기사 제외
     with_content = [a for a in all_articles if a.get("content")]
     print(f"[Finlight] 수집 {len(all_articles)}개 → content 있음 {len(with_content)}개")
+    if with_content:
+        sample = with_content[0]
+        print(f"[Finlight] 샘플 필드: {list(sample.keys())} tickers={sample.get('tickers') or sample.get('symbols')}")
 
     # DB에 없는 새 기사만
     links = [a["link"] for a in with_content]
@@ -196,7 +199,8 @@ async def analyze_and_update(articles: list[dict]) -> None:
                     # trailing slash 버전으로 재시도
                     res2 = supabase_admin.table("news_articles").update(update_data).eq("source_url", link + "/").execute()
                     rows = len(res2.data) if res2.data else 0
-                print(f"[DB] 업데이트: {link[:60]} → label={sentiment.get('label')} rows={rows}")
+                summary_val = enrichment.get("summary_3lines", [])
+                print(f"[DB] 업데이트: {link[:60]} → label={sentiment.get('label')} rows={rows} summary_count={len(summary_val)} summary_sample={str(summary_val[0])[:40] if summary_val else 'EMPTY'}")
                 updated += 1
             except Exception as e:
                 failed += 1
