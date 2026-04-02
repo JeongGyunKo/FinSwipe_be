@@ -70,12 +70,13 @@ async def submit_article(
         return False
 
 
-async def drain_queue(max_jobs: int = 600) -> int:
+async def drain_queue(target_ids: set[str] | None = None, max_jobs: int = 10000) -> int:
     """
-    GenAI 큐를 비울 때까지 process-next 반복 호출.
+    GenAI 큐 처리. target_ids가 주어지면 해당 기사가 모두 완료되면 조기 종료.
     processed=False 반환 시 큐 비워짐.
     """
     count = 0
+    remaining = set(target_ids) if target_ids else None
     for _ in range(max_jobs):
         try:
             resp = await get_client().post("/api/v1/jobs/process-next")
@@ -83,7 +84,14 @@ async def drain_queue(max_jobs: int = 600) -> int:
             if not data.get("processed", False):
                 break
             count += 1
-            # process-next는 동기식(완료 후 응답)이므로 별도 sleep 불필요
+            # 우리가 제출한 기사가 처리됐으면 remaining에서 제거
+            if remaining is not None:
+                processed_id = data.get("news_id")
+                if processed_id:
+                    remaining.discard(processed_id)
+                if not remaining:
+                    print(f"[GenAI] 목표 기사 전부 처리 완료, drain 종료 (총 {count}개)")
+                    break
         except Exception as e:
             print(f"[GenAI] process-next 오류: {e}")
             break
@@ -161,6 +169,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
     ]
 
     submitted = []
+    submitted_ids: set[str] = set()
     for a in valid:
         link = a.get("link") or a.get("source_url") or ""
         ok = await submit_article(
@@ -172,8 +181,11 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
             tickers=a.get("tickers") or None,
         )
         submitted.append(ok)
+        if ok:
+            submitted_ids.add(link)
 
-    await drain_queue(max_jobs=10000)  # 큐 전체 소진 (백로그 포함)
+    print(f"[GenAI] 제출 완료 {len(submitted_ids)}개, 큐 처리 시작...")
+    await drain_queue(target_ids=submitted_ids)  # 우리 기사가 처리되면 즉시 종료
 
     output = []
     for article, ok in zip(valid, submitted):
