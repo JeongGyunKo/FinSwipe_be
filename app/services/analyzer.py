@@ -83,7 +83,7 @@ async def drain_queue(max_jobs: int = 600) -> int:
             if not data.get("processed", False):
                 break
             count += 1
-            await asyncio.sleep(2)  # 기사당 평균 처리 시간 대기
+            # process-next는 동기식(완료 후 응답)이므로 별도 sleep 불필요
         except Exception as e:
             print(f"[GenAI] process-next 오류: {e}")
             break
