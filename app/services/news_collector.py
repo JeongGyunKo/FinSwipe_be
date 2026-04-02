@@ -185,10 +185,13 @@ async def analyze_and_update(articles: list[dict]) -> None:
                     "sentiment_score": sentiment.get("score"),
                     "summary_3lines": enrichment.get("summary_3lines", []),
                 }
-                # trailing slash 유무 양쪽 모두 업데이트 시도
                 res = supabase_admin.table("news_articles").update(update_data).eq("source_url", link).execute()
-                if not res.data:
-                    supabase_admin.table("news_articles").update(update_data).eq("source_url", link + "/").execute()
+                rows = len(res.data) if res.data else 0
+                if rows == 0:
+                    # trailing slash 버전으로 재시도
+                    res2 = supabase_admin.table("news_articles").update(update_data).eq("source_url", link + "/").execute()
+                    rows = len(res2.data) if res2.data else 0
+                print(f"[DB] 업데이트: {link[:60]} → label={sentiment.get('label')} rows={rows}")
                 updated += 1
             except Exception as e:
                 failed += 1
