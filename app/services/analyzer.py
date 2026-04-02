@@ -179,7 +179,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
     submitted = []
     submitted_ids: set[str] = set()
     for a in valid:
-        link = a.get("link") or a.get("source_url") or ""
+        link = (a.get("link") or a.get("source_url") or "").rstrip("/")
         ok = await submit_article(
             news_id=link,
             title=a.get("title") or a.get("headline") or "",
@@ -200,7 +200,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
         if not ok:
             output.append({**article, "enrichment": _unavailable("제출 실패")})
             continue
-        link = article.get("link") or article.get("source_url") or ""
+        link = (article.get("link") or article.get("source_url") or "").rstrip("/")
         result = await fetch_result(link) or _unavailable("결과 없음")
         output.append({**article, "enrichment": result})
     return output

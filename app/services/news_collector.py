@@ -167,7 +167,7 @@ async def analyze_and_update(articles: list[dict]) -> None:
         for article in enriched:
             enrichment = article.get("enrichment") or {}
             sentiment = enrichment.get("sentiment")
-            link = article.get("link") or article.get("source_url")
+            link = (article.get("link") or article.get("source_url") or "").rstrip("/")
 
             if not link:
                 skipped += 1
@@ -180,11 +180,15 @@ async def analyze_and_update(articles: list[dict]) -> None:
                 continue
 
             try:
-                supabase_admin.table("news_articles").update({
+                update_data = {
                     "sentiment_label": sentiment.get("label"),
                     "sentiment_score": sentiment.get("score"),
                     "summary_3lines": enrichment.get("summary_3lines", []),
-                }).eq("source_url", link).execute()
+                }
+                # trailing slash 유무 양쪽 모두 업데이트 시도
+                res = supabase_admin.table("news_articles").update(update_data).eq("source_url", link).execute()
+                if not res.data:
+                    supabase_admin.table("news_articles").update(update_data).eq("source_url", link + "/").execute()
                 updated += 1
             except Exception as e:
                 failed += 1
