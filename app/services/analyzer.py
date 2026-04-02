@@ -64,6 +64,10 @@ async def submit_article(
             payload["ticker"] = tickers
 
         resp = await get_client().post("/api/v1/articles/enrich-text", json=payload)
+        body = resp.json() if resp.status_code in (200, 202) else {}
+        queued = body.get("queued")
+        state = body.get("processing_state")
+        print(f"[GenAI] submit {news_id[:60]} → status={resp.status_code} queued={queued} state={state}")
         return resp.status_code in (200, 202)
     except Exception as e:
         print(f"[GenAI] 제출 실패: {news_id[:60]} | {e}")
@@ -84,11 +88,14 @@ async def drain_queue(target_ids: set[str] | None = None, max_jobs: int = 10000)
             if not data.get("processed", False):
                 break
             count += 1
+            p_state = data.get("processing_state")
+            p_outcome = data.get("analysis_outcome")
+            p_id = data.get("news_id", "")
+            print(f"[GenAI] process-next #{count}: news_id={p_id[:60]} state={p_state} outcome={p_outcome}")
             # 우리가 제출한 기사가 처리됐으면 remaining에서 제거
             if remaining is not None:
-                processed_id = data.get("news_id")
-                if processed_id:
-                    remaining.discard(processed_id)
+                if p_id:
+                    remaining.discard(p_id)
                 if not remaining:
                     print(f"[GenAI] 목표 기사 전부 처리 완료, drain 종료 (총 {count}개)")
                     break
@@ -107,9 +114,10 @@ async def fetch_result(news_id: str) -> dict | None:
         # httpx base_url 병합 시 %3A 등이 디코딩될 수 있으므로 절대 URL 직접 구성
         base = str(get_client().base_url).rstrip("/")
         full_url = f"{base}/api/v1/news/{encoded_id}/result"
-        print(f"[DEBUG] fetch_result: {full_url[:100]}")
+        print(f"[DEBUG] fetch_result URL: {full_url}")
         resp = await get_client().get(full_url)
-        print(f"[DEBUG] fetch_result status={resp.status_code} state={resp.json().get('processing_state') if resp.status_code == 200 else 'N/A'}")
+        body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+        print(f"[DEBUG] fetch_result status={resp.status_code} state={body.get('processing_state')} outcome={body.get('result', {}).get('outcome') if body.get('result') else None}")
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
