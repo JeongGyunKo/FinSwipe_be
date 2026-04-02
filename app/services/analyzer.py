@@ -168,7 +168,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
         )
         submitted.append(ok)
 
-    await drain_queue(max_jobs=len(valid) + 20)
+    await drain_queue(max_jobs=10000)  # 큐 전체 소진 (백로그 포함)
 
     output = []
     for article, ok in zip(valid, submitted):
