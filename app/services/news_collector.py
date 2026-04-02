@@ -74,9 +74,6 @@ async def fetch_news_from_finlight() -> list[dict]:
     # content 없는 기사 제외
     with_content = [a for a in all_articles if a.get("content")]
     print(f"[Finlight] 수집 {len(all_articles)}개 → content 있음 {len(with_content)}개")
-    if with_content:
-        s = with_content[0]
-        print(f"[Finlight] entities 샘플: {s.get('entities')} tickers={s.get('tickers')} symbols={s.get('symbols')}")
 
     # DB에 없는 새 기사만
     links = [a["link"] for a in with_content]
