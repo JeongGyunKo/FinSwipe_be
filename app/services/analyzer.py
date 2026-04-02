@@ -88,6 +88,7 @@ def _parse_storage_payload(enrichment: dict) -> dict:
     ]
 
     mixed = enrichment.get("article_mixed") or {}
+    xai = enrichment.get("xai") or None
 
     return {
         "status": enrichment.get("analysis_status"),
@@ -95,6 +96,7 @@ def _parse_storage_payload(enrichment: dict) -> dict:
         "sentiment": sentiment,
         "summary_3lines": summary_3lines,
         "is_mixed": mixed.get("is_mixed"),
+        "xai": xai,
         "error": None,
     }
 

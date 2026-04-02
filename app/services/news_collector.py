@@ -184,6 +184,7 @@ async def analyze_and_update(articles: list[dict]) -> None:
                     "sentiment_label": sentiment.get("label"),
                     "sentiment_score": sentiment.get("score"),
                     "summary_3lines": enrichment.get("summary_3lines", []),
+                    "xai": enrichment.get("xai"),
                 }
                 res = supabase_admin.table("news_articles").update(update_data).eq("source_url", link).execute()
                 rows = len(res.data) if res.data else 0
