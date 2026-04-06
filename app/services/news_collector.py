@@ -5,6 +5,36 @@ from app.core.supabase import supabase_admin
 
 FINLIGHT_BASE_URL = "https://api.finlight.me"
 
+# 암호화폐 티커 블록리스트
+CRYPTO_TICKERS = {
+    "BTC", "ETH", "BNB", "XRP", "ADA", "SOL", "DOGE", "DOT", "SHIB", "MATIC",
+    "LTC", "TRX", "AVAX", "LINK", "UNI", "ATOM", "XLM", "ETC", "BCH", "ALGO",
+    "VET", "ICP", "FIL", "THETA", "XMR", "EOS", "AAVE", "GRT", "MKR", "COMP",
+    "SNX", "YFI", "SUSHI", "CRV", "BAT", "ZEC", "DASH", "NEO", "WAVES", "IOTA",
+    "XTZ", "EGLD", "HBAR", "NEAR", "FTM", "ONE", "SAND", "MANA", "AXS", "ENJ",
+    "CHZ", "FLOW", "GALA", "IMX", "APE", "LRC", "CRO", "KCS", "HT", "OKB",
+    "USDT", "USDC", "BUSD", "DAI", "TUSD", "USDP", "FRAX", "LUSD", "USDD",
+    "WBTC", "STETH", "RETH", "CBETH", "WETH",
+    "SUI", "APT", "ARB", "OP", "BLUR", "PEPE", "FLOKI", "BONK", "WIF", "JUP",
+}
+
+
+def _filter_tickers(companies: list) -> list[str]:
+    """아시아 증시(숫자) 티커 및 암호화폐 티커 제거 → 미국 주식 티커만 남김"""
+    result = []
+    for c in companies:
+        ticker = (c.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        # 숫자 포함 티커 제거 (아시아 증시: 2317, 005930 등)
+        if not ticker.isalpha():
+            continue
+        # 암호화폐 티커 제거
+        if ticker in CRYPTO_TICKERS:
+            continue
+        result.append(ticker)
+    return result
+
 # 다양한 쿼리로 content 있는 기사 최대화
 COLLECTION_QUERIES = [
     "stock market earnings revenue",
@@ -122,7 +152,7 @@ def save_news_to_db(articles: list[dict]) -> dict:
         summary = (article.get("summary") or "").strip()
         content = (article.get("content") or "").strip()
         companies = article.get("companies") or []
-        tickers = [c["ticker"] for c in companies if c.get("ticker")]
+        tickers = _filter_tickers(companies)
 
         # summary 없으면 content 앞 300자로 대체
         if not summary and content:
