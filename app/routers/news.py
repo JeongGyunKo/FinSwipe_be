@@ -95,3 +95,75 @@ async def analyze_latest(limit: int = 10):
         "count": len(analyzed),
         "data": analyzed
     }
+
+
+class DiagnoseRequest(BaseModel):
+    source_url: str
+
+
+@router.post("/diagnose")
+async def diagnose_article(body: DiagnoseRequest):
+    """특정 기사를 GenAI에 직접 제출 → process-next 원본 응답 전체 반환 (실패 원인 진단용)"""
+    import asyncio
+    from app.services.analyzer import get_client, submit_article
+
+    url = body.source_url.rstrip("/")
+
+    # DB에서 기사 조회
+    res = supabase.table("news_articles").select("*").eq("source_url", url).limit(1).execute()
+    if not res.data:
+        res = supabase.table("news_articles").select("*").eq("source_url", url + "/").limit(1).execute()
+    if not res.data:
+        return {"error": f"DB에서 기사를 찾을 수 없음: {url}"}
+
+    article = res.data[0]
+    title = article.get("headline") or article.get("title") or ""
+    content = (article.get("content") or "").strip()
+    summary = (article.get("summary") or "").strip()
+
+    # GenAI 제출
+    ok = await submit_article(
+        news_id=url,
+        title=title,
+        link=url,
+        article_text=content or None,
+        summary_text=summary or None,
+    )
+    if not ok:
+        return {"error": "GenAI 제출 실패 (HTTP 오류)"}
+
+    # process-next 로 결과 수집 (최대 30회 시도)
+    client = get_client()
+    for i in range(30):
+        resp = await client.post("/api/v1/jobs/process-next")
+        data = resp.json()
+        if not data.get("processed", False):
+            return {
+                "submitted": True,
+                "result": "큐 소진 — 기사가 처리되지 않음",
+                "attempts": i,
+                "article_info": {
+                    "url": url,
+                    "title": title,
+                    "content_length": len(content),
+                    "has_summary": bool(summary),
+                },
+            }
+        p_id = (data.get("news_id") or "").rstrip("/")
+        if p_id == url:
+            # 원본 응답 전체 반환
+            return {
+                "submitted": True,
+                "attempts": i + 1,
+                "raw_response": data,
+                "article_info": {
+                    "url": url,
+                    "title": title,
+                    "content_length": len(content),
+                    "has_summary": bool(summary),
+                },
+            }
+        # 다른 기사가 먼저 나온 경우 계속 대기
+        await asyncio.sleep(0.1)
+
+    return {"error": "30회 시도 후 결과 없음", "submitted": True}
