@@ -163,6 +163,15 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                 else:
                     results[p_id] = _unavailable(f"처리 실패: {p_outcome}")
                     print(f"[GenAI] 실패: {p_id[:60]} outcome={p_outcome}")
+                    # 실패 원인 상세 로깅
+                    if enrichment:
+                        stage_statuses = enrichment.get("stage_statuses") or {}
+                        errors = enrichment.get("errors") or []
+                        print(f"  ↳ stage_statuses: {stage_statuses}")
+                        if errors:
+                            print(f"  ↳ errors: {errors}")
+                    else:
+                        print(f"  ↳ enrichment 없음 (process-next 응답에 enrichment 필드 누락)")
 
                 if not remaining:
                     print(f"[GenAI] 목표 기사 전부 완료 (총 {i+1}개 처리)")

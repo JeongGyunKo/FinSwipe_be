@@ -181,7 +181,12 @@ async def analyze_and_update(articles: list[dict]) -> None:
 
             # 감성 분석 실패 시 DB 업데이트 안 함 (기존 데이터 보호)
             if not isinstance(sentiment, dict):
+                status = enrichment.get("status")
+                outcome = enrichment.get("outcome")
+                error = enrichment.get("error")
+                summary_count = len(enrichment.get("summary_3lines") or [])
                 print(f"[백그라운드] 스킵 (sentiment 없음): {link[:60]}")
+                print(f"  ↳ status={status} outcome={outcome} summary_count={summary_count} error={error}")
                 skipped += 1
                 continue
 
