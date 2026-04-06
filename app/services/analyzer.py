@@ -159,13 +159,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                 remaining.discard(p_id)
                 if enrichment and p_outcome in ("success", "partial_success"):
                     results[p_id] = _parse_storage_payload(enrichment)
-                    print(f"[XAI DEBUG] news_id={p_id[:80]}")
-                    print(f"[XAI DEBUG] analysis_status={enrichment.get('analysis_status')}")
-                    print(f"[XAI DEBUG] cleaned_text_available={enrichment.get('cleaned_text_available')}")
-                    print(f"[XAI DEBUG] sentiment={enrichment.get('sentiment')}")
-                    print(f"[XAI DEBUG] xai={enrichment.get('xai')}")
-                    print(f"[XAI DEBUG] errors={enrichment.get('errors')}")
-                    print(f"[XAI DEBUG] stage_statuses={enrichment.get('stage_statuses')}")
+                    print(f"[GenAI] 결과 수집: {p_id[:60]} outcome={p_outcome}")
                 else:
                     results[p_id] = _unavailable(f"처리 실패: {p_outcome}")
                     print(f"[GenAI] 실패: {p_id[:60]} outcome={p_outcome}")
