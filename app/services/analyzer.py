@@ -187,6 +187,52 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
             print(f"[GenAI] process-next 오류: {e}")
             break
 
+    # 큐 소진 후에도 남은 기사 → 1회 재제출 후 재처리
+    if remaining:
+        print(f"[GenAI] 큐 소진 후 미처리 {len(remaining)}개 → 재제출 시도...")
+        resubmitted = set()
+        for link in remaining:
+            a = submitted_map[link]
+            ok = await submit_article(
+                news_id=link,
+                title=a.get("title") or a.get("headline") or "",
+                link=link,
+                article_text=(a.get("content") or "").strip() or None,
+                summary_text=(a.get("summary") or "").strip() or None,
+                tickers=a.get("tickers") or None,
+            )
+            if ok:
+                resubmitted.add(link)
+                print(f"[GenAI] 재제출 성공: {link[:60]}")
+            else:
+                print(f"[GenAI] 재제출 실패: {link[:60]}")
+
+        # 재제출된 기사만 다시 process-next
+        remaining2 = resubmitted.copy()
+        for i in range(len(resubmitted) * 3 + 10):
+            if not remaining2:
+                break
+            try:
+                resp = await get_client().post("/api/v1/jobs/process-next")
+                data = resp.json()
+                if not data.get("processed", False):
+                    print(f"[GenAI] 재처리 큐 소진 (총 {i}개 처리)")
+                    break
+                p_id = (data.get("news_id") or "").rstrip("/")
+                p_outcome = data.get("analysis_outcome")
+                enrichment = data.get("enrichment")
+                if p_id in remaining2:
+                    remaining2.discard(p_id)
+                    if enrichment and p_outcome in ("success", "partial_success"):
+                        results[p_id] = _parse_storage_payload(enrichment)
+                        print(f"[GenAI] 재처리 결과 수집: {p_id[:60]} outcome={p_outcome}")
+                    else:
+                        results[p_id] = _unavailable(f"재처리 실패: {p_outcome}")
+                        print(f"[GenAI] 재처리 실패: {p_id[:60]} outcome={p_outcome}")
+            except Exception as e:
+                print(f"[GenAI] 재처리 오류: {e}")
+                break
+
     # 결과 미수집 기사 처리
     output = []
     for a in valid:
