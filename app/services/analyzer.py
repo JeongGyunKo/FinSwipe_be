@@ -155,6 +155,13 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
             p_outcome = data.get("analysis_outcome")
             enrichment = data.get("enrichment")
 
+            if p_id not in remaining:
+                # 제출한 기사가 아닌 경우 - ID 불일치 디버그
+                print(f"[GenAI] 큐에서 처리됐지만 우리 목록에 없음: {p_id[:80]}")
+                if remaining:
+                    sample = list(remaining)[0]
+                    print(f"  ↳ remaining 샘플: {sample[:80]}")
+
             if p_id in remaining:
                 remaining.discard(p_id)
                 if enrichment and p_outcome in ("success", "partial_success"):
