@@ -38,7 +38,6 @@ def _filter_tickers(companies: list) -> list[str]:
 # 다양한 쿼리로 content 있는 기사 최대화
 COLLECTION_QUERIES = [
     "stock market earnings revenue",
-    "cryptocurrency bitcoin ethereum",
     "Federal Reserve interest rates inflation",
     "tech stocks Apple Microsoft Google",
     "oil energy commodities",
