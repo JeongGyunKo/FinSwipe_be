@@ -6,7 +6,10 @@ DEEPL_URL = "https://api-free.deepl.com/v2/translate"
 
 async def translate_texts(texts: list[str]) -> list[str]:
     """텍스트 목록을 한국어로 번역 (DeepL Free API)"""
-    if not texts or not settings.deepl_api_key:
+    if not texts:
+        return texts
+    if not settings.deepl_api_key:
+        print("[DeepL] API 키 없음 → 번역 스킵")
         return texts
 
     try:
@@ -20,8 +23,12 @@ async def translate_texts(texts: list[str]) -> list[str]:
                     "source_lang": "EN",
                 },
             )
-            resp.raise_for_status()
+            print(f"[DeepL] 응답 status={resp.status_code}")
+            if resp.status_code != 200:
+                print(f"[DeepL] 에러 응답: {resp.text[:200]}")
+                return texts
             translations = resp.json().get("translations", [])
+            print(f"[DeepL] 번역 완료 {len(translations)}개")
             return [t.get("text", original) for t, original in zip(translations, texts)]
     except Exception as e:
         print(f"[DeepL] 번역 실패: {e}")
