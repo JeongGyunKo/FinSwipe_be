@@ -187,6 +187,7 @@ def save_news_to_db(articles: list[dict]) -> dict:
 async def analyze_and_update(articles: list[dict]) -> None:
     """백그라운드에서 GenAI 분석 후 DB 업데이트 (성공한 결과만 저장)"""
     from app.services.analyzer import analyze_news_batch
+    from app.services.translator import translate_article
 
     if not articles:
         return
@@ -220,11 +221,19 @@ async def analyze_and_update(articles: list[dict]) -> None:
                 continue
 
             try:
+                headline = article.get("headline") or article.get("title") or ""
+                summary_3lines = enrichment.get("summary_3lines") or []
+
+                # DeepL 번역
+                headline_ko, summary_3lines_ko = await translate_article(headline, summary_3lines)
+
                 update_data = {
                     "sentiment_label": sentiment.get("label"),
                     "sentiment_score": sentiment.get("score"),
-                    "summary_3lines": enrichment.get("summary_3lines", []),
+                    "summary_3lines": summary_3lines,
                     "xai": enrichment.get("xai"),
+                    "headline_ko": headline_ko,
+                    "summary_3lines_ko": summary_3lines_ko,
                 }
                 res = supabase_admin.table("news_articles").update(update_data).eq("source_url", link).execute()
                 rows = len(res.data) if res.data else 0
