@@ -54,3 +54,22 @@ async def translate_article(headline: str, summary_3lines: list[str]) -> tuple[s
     texts = [headline] + summary_3lines
     translated = await translate_texts(texts)
     return translated[0], translated[1:]
+
+
+async def translate_xai_highlights(xai: dict | None) -> dict | None:
+    """XAI highlights의 text_snippet을 한국어로 번역해 text_snippet_ko 필드 추가"""
+    if not xai:
+        return xai
+
+    highlights = xai.get("highlights") or []
+    if not highlights:
+        return xai
+
+    snippets = [h.get("text_snippet") or "" for h in highlights]
+    translated = await translate_texts(snippets)
+
+    new_highlights = []
+    for h, ko in zip(highlights, translated):
+        new_highlights.append({**h, "text_snippet_ko": ko})
+
+    return {**xai, "highlights": new_highlights}

@@ -245,7 +245,7 @@ def _db_update_article(update_data: dict, link: str) -> int:
 
 async def _do_analyze_and_update(articles: list[dict]) -> None:
     from app.services.analyzer import analyze_news_batch
-    from app.services.translator import translate_article
+    from app.services.translator import translate_article, translate_xai_highlights
 
     try:
         logger.info(f"[백그라운드] GenAI 분석 시작 → {len(articles)}개")
@@ -278,12 +278,13 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                 summary_3lines = enrichment.get("summary_3lines") or []
 
                 headline_ko, summary_3lines_ko = await translate_article(headline, summary_3lines)
+                xai = await translate_xai_highlights(enrichment.get("xai"))
 
                 update_data = {
                     "sentiment_label": sentiment.get("label"),
                     "sentiment_score": sentiment.get("score"),
                     "summary_3lines": summary_3lines,
-                    "xai": enrichment.get("xai"),
+                    "xai": xai,
                     "headline_ko": headline_ko,
                     "summary_3lines_ko": summary_3lines_ko,
                 }
