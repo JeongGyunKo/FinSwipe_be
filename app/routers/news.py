@@ -114,6 +114,50 @@ async def translate_all_articles(request: Request):
     return {"job_id": job_id, "status": "pending", "total": len(articles)}
 
 
+@router.post("/backfill-xai-ko", dependencies=[Depends(_require_admin)])
+@limiter.limit("2/minute")
+async def backfill_xai_ko(request: Request):
+    """xai는 있지만 xai_ko가 없는 기사 일괄 번역 (백그라운드)"""
+    from app.core.jobs import start_job, finish_job
+    from app.services.translator import translate_xai_highlights
+
+    result = await asyncio.to_thread(
+        lambda: supabase.table("news_articles")
+            .select("id, xai, source_url")
+            .is_("xai_ko", "null")
+            .not_.is_("xai", "null")
+            .execute()
+    )
+    articles = result.data
+    if not articles:
+        return {"triggered": 0, "message": "채울 기사 없음"}
+
+    job_id = create_job("backfill-xai-ko")
+
+    async def _backfill():
+        start_job(job_id)
+        success = 0
+        failed = 0
+        for article in articles:
+            try:
+                xai_ko = await translate_xai_highlights(article.get("xai"))
+                await asyncio.to_thread(
+                    lambda: supabase.table("news_articles")
+                        .update({"xai_ko": xai_ko})
+                        .eq("id", article["id"])
+                        .execute()
+                )
+                success += 1
+            except Exception as e:
+                failed += 1
+                logger.error(f"[xai_ko backfill] 실패 ({article.get('source_url', '')[:50]}): {e}")
+        logger.info(f"[xai_ko backfill] 완료 → 성공 {success}개 / 실패 {failed}개")
+        finish_job(job_id, {"success": success, "failed": failed})
+
+    asyncio.create_task(_backfill())
+    return {"job_id": job_id, "status": "pending", "total": len(articles)}
+
+
 @router.get("/jobs/{job_id}", dependencies=[Depends(_require_admin)])
 async def get_job_status(job_id: str):
     """백그라운드 작업 상태 조회"""
