@@ -3,6 +3,8 @@ import httpx
 from app.core.config import settings
 from app.core.supabase import supabase_admin
 
+_analysis_lock = asyncio.Lock()
+
 FINLIGHT_BASE_URL = "https://api.finlight.me"
 
 # 암호화폐 티커 블록리스트
@@ -192,6 +194,18 @@ async def analyze_and_update(articles: list[dict]) -> None:
     if not articles:
         return
 
+    if _analysis_lock.locked():
+        print(f"[백그라운드] 분석 진행 중 → 스킵 ({len(articles)}개)")
+        return
+
+    async with _analysis_lock:
+        await _do_analyze_and_update(articles)
+
+
+async def _do_analyze_and_update(articles: list[dict]) -> None:
+    from app.services.analyzer import analyze_news_batch
+    from app.services.translator import translate_article
+
     try:
         print(f"[백그라운드] GenAI 분석 시작 → {len(articles)}개")
         enriched = await analyze_news_batch(articles)
@@ -302,3 +316,21 @@ async def collect_market_news() -> dict:
         print(f"[백그라운드] GenAI 분석 예약 → {result['saved']}개")
 
     return {**result, "analyzing": result["saved"]}
+
+
+async def reanalyze_unanalyzed(limit: int = 50) -> None:
+    """sentiment가 NULL인 기사 재분석 (스케줄러용)"""
+    try:
+        result = supabase_admin.table("news_articles")\
+            .select("*")\
+            .is_("sentiment_label", "null")\
+            .order("published_at", desc=True)\
+            .limit(limit)\
+            .execute()
+        articles = result.data
+        if not articles:
+            return
+        print(f"[재분석] 미분석 기사 {len(articles)}개 발견 → 분석 시작")
+        await analyze_and_update(articles)
+    except Exception as e:
+        print(f"[재분석] 오류: {type(e).__name__}: {e}")
