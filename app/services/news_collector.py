@@ -110,7 +110,7 @@ async def fetch_news_from_finlight() -> list[dict]:
 
     # DB에 없는 새 기사만
     links = [a["link"] for a in with_tickers]
-    new_links = _filter_new_links(links)
+    new_links = await asyncio.to_thread(_filter_new_links, links)
     new_articles = [a for a in with_tickers if a.get("link") in new_links]
     print(f"[Finlight] 새 기사 {len(new_articles)}개")
     return new_articles
@@ -188,9 +188,6 @@ def save_news_to_db(articles: list[dict]) -> dict:
 
 async def analyze_and_update(articles: list[dict]) -> None:
     """백그라운드에서 GenAI 분석 후 DB 업데이트 (성공한 결과만 저장)"""
-    from app.services.analyzer import analyze_news_batch
-    from app.services.translator import translate_article
-
     if not articles:
         return
 
@@ -305,7 +302,7 @@ async def collect_market_news() -> dict:
         print("새 기사 없음 - 수집 종료")
         return {"saved": 0, "skipped": 0, "analyzing": 0}
 
-    result = save_news_to_db(new_articles)
+    result = await asyncio.to_thread(save_news_to_db, new_articles)
     print(f"저장 완료 → {result['saved']}개 저장, {result['skipped']}개 스킵")
 
     if result["saved"] > 0:

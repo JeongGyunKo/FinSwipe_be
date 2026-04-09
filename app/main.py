@@ -3,14 +3,16 @@ from contextlib import asynccontextmanager
 from app.routers import news, briefing, portfolio
 from app.scheduler import start_scheduler
 from app.services import analyzer
+from app.services import translator
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await analyzer.init_client()   # GenAI 클라이언트 초기화
+    await analyzer.init_client()
     start_scheduler()
     yield
-    await analyzer.close_client()  # 앱 종료 시 클라이언트 정리
+    await analyzer.close_client()
+    await translator.close_client()
 
 
 app = FastAPI(title="AI News Curation API", lifespan=lifespan)
