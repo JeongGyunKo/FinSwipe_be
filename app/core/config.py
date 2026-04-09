@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     genai_password: str
 
     deepl_api_key: str = ""
+    admin_api_key: str
 
     class Config:
         env_file = ".env"

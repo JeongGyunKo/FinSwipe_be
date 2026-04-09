@@ -199,6 +199,15 @@ async def analyze_and_update(articles: list[dict]) -> None:
         await _do_analyze_and_update(articles)
 
 
+def _db_update_article(update_data: dict, link: str) -> int:
+    res = supabase_admin.table("news_articles").update(update_data).eq("source_url", link).execute()
+    rows = len(res.data) if res.data else 0
+    if rows == 0:
+        res2 = supabase_admin.table("news_articles").update(update_data).eq("source_url", link + "/").execute()
+        rows = len(res2.data) if res2.data else 0
+    return rows
+
+
 async def _do_analyze_and_update(articles: list[dict]) -> None:
     from app.services.analyzer import analyze_news_batch
     from app.services.translator import translate_article
@@ -220,7 +229,6 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                 skipped += 1
                 continue
 
-            # 감성 분석 실패 시 DB 업데이트 안 함 (기존 데이터 보호)
             if not isinstance(sentiment, dict):
                 status = enrichment.get("status")
                 outcome = enrichment.get("outcome")
@@ -235,7 +243,6 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                 headline = article.get("headline") or article.get("title") or ""
                 summary_3lines = enrichment.get("summary_3lines") or []
 
-                # DeepL 번역
                 headline_ko, summary_3lines_ko = await translate_article(headline, summary_3lines)
 
                 update_data = {
@@ -246,12 +253,7 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                     "headline_ko": headline_ko,
                     "summary_3lines_ko": summary_3lines_ko,
                 }
-                res = supabase_admin.table("news_articles").update(update_data).eq("source_url", link).execute()
-                rows = len(res.data) if res.data else 0
-                if rows == 0:
-                    # trailing slash 버전으로 재시도
-                    res2 = supabase_admin.table("news_articles").update(update_data).eq("source_url", link + "/").execute()
-                    rows = len(res2.data) if res2.data else 0
+                rows = await asyncio.to_thread(_db_update_article, update_data, link)
                 print(f"[DB] 업데이트: {link[:60]} → label={sentiment.get('label')} rows={rows}")
                 updated += 1
             except Exception as e:
@@ -315,16 +317,20 @@ async def collect_market_news() -> dict:
     return {**result, "analyzing": result["saved"]}
 
 
+def _fetch_unanalyzed(limit: int) -> list[dict]:
+    result = supabase_admin.table("news_articles")\
+        .select("*")\
+        .is_("sentiment_label", "null")\
+        .order("published_at", desc=True)\
+        .limit(limit)\
+        .execute()
+    return result.data
+
+
 async def reanalyze_unanalyzed(limit: int = 50) -> None:
     """sentiment가 NULL인 기사 재분석 (스케줄러용)"""
     try:
-        result = supabase_admin.table("news_articles")\
-            .select("*")\
-            .is_("sentiment_label", "null")\
-            .order("published_at", desc=True)\
-            .limit(limit)\
-            .execute()
-        articles = result.data
+        articles = await asyncio.to_thread(_fetch_unanalyzed, limit)
         if not articles:
             return
         print(f"[재분석] 미분석 기사 {len(articles)}개 발견 → 분석 시작")
