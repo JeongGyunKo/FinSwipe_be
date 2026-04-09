@@ -2,8 +2,10 @@ import asyncio
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from app.core.cache import cache_get, cache_set
 from app.core.config import settings
+from app.core.jobs import create_job, get_job
 from app.core.limiter import limiter
 from app.core.supabase import supabase_admin as supabase
 from app.services.news_collector import collect_market_news, reanalyze_unanalyzed
@@ -21,18 +23,21 @@ async def _require_admin(key: str | None = Depends(_api_key_header)) -> None:
 
 
 class AnalyzeRequest(BaseModel):
-    headline: str
-    source_url: str
-    content: str = ""
-    tickers: list[str] = []
+    headline: str = Field(..., min_length=1, max_length=500)
+    source_url: str = Field(..., pattern=r"^https?://")
+    content: str = Field("", max_length=50000)
+    tickers: list[str] = Field(default_factory=list, max_length=20)
 
 
 class DiagnoseRequest(BaseModel):
-    source_url: str
+    source_url: str = Field(..., pattern=r"^https?://")
 
+
+# ── 관리용 엔드포인트 ────────────────────────────────────────────
 
 @router.get("/test", dependencies=[Depends(_require_admin)])
-async def test_supabase():
+@limiter.limit("30/minute")
+async def test_supabase(request: Request):
     result = await asyncio.to_thread(
         lambda: supabase.table("news_articles").select("*").limit(5).execute()
     )
@@ -40,47 +45,29 @@ async def test_supabase():
 
 
 @router.post("/collect", dependencies=[Depends(_require_admin)])
-async def collect_news():
+@limiter.limit("5/minute")
+async def collect_news(request: Request):
     """뉴스 수집 트리거 (수동)"""
     return await collect_market_news()
 
 
-@router.get("/latest")
-@limiter.limit("30/minute")
-async def get_latest_news(request: Request, limit: int = Query(default=20, ge=1, le=100)):
-    """최신 뉴스 조회"""
-    result = await asyncio.to_thread(
-        lambda: supabase.table("news_articles")
-            .select("*")
-            .order("published_at", desc=True)
-            .limit(limit)
-            .execute()
-    )
-    return {"count": len(result.data), "data": result.data}
-
-
-@router.get("/genai/health")
-@limiter.limit("10/minute")
-async def genai_health(request: Request):
-    """GenAI 서버 상태 확인"""
-    return await check_genai_health()
-
-
-@router.post("/analyze", dependencies=[Depends(_require_admin)])
-async def analyze_single(body: AnalyzeRequest):
-    """단일 뉴스 분석 (GenAI 서버 - 요약 + 감성)"""
-    enriched = await analyze_news_batch([{
-        "link": body.source_url,
-        "title": body.headline,
-        "content": body.content or "",
-        "tickers": body.tickers or [],
-    }])
-    return enriched[0].get("enrichment") if enriched else _unavailable("분석 실패")
+@router.post("/reanalyze", dependencies=[Depends(_require_admin)])
+@limiter.limit("5/minute")
+async def reanalyze_endpoint(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """sentiment가 NULL인 기사 재분석 트리거 (백그라운드) — job_id로 상태 조회 가능"""
+    job_id = create_job("reanalyze")
+    asyncio.create_task(reanalyze_unanalyzed(limit, job_id=job_id))
+    return {"job_id": job_id, "status": "pending"}
 
 
 @router.post("/translate-all", dependencies=[Depends(_require_admin)])
-async def translate_all_articles():
-    """번역 안 된 기사 전체 번역 (백그라운드)"""
+@limiter.limit("2/minute")
+async def translate_all_articles(request: Request):
+    """번역 안 된 기사 전체 번역 (백그라운드) — job_id로 상태 조회 가능"""
+    from app.core.jobs import start_job, finish_job, fail_job
     from app.services.translator import translate_article
 
     result = await asyncio.to_thread(
@@ -94,6 +81,8 @@ async def translate_all_articles():
     if not articles:
         return {"triggered": 0, "message": "번역할 기사 없음"}
 
+    job_id = create_job("translate-all")
+
     def _db_update_translation(article_id: str, headline_ko: str, summary_3lines_ko: list) -> None:
         supabase.table("news_articles").update({
             "headline_ko": headline_ko,
@@ -101,6 +90,7 @@ async def translate_all_articles():
         }).eq("id", article_id).execute()
 
     async def _translate_all():
+        start_job(job_id)
         success = 0
         failed = 0
         for article in articles:
@@ -116,20 +106,37 @@ async def translate_all_articles():
                 failed += 1
                 logger.error(f"[번역] 실패 ({article.get('source_url', '')[:50]}): {e}")
         logger.info(f"[번역] 완료 → 성공 {success}개 / 실패 {failed}개")
+        finish_job(job_id, {"success": success, "failed": failed})
 
     asyncio.create_task(_translate_all())
-    return {"triggered": len(articles), "message": f"{len(articles)}개 번역 시작 (백그라운드)"}
+    return {"job_id": job_id, "status": "pending", "total": len(articles)}
 
 
-@router.get("/reanalyze", dependencies=[Depends(_require_admin)])
-async def reanalyze_endpoint(limit: int = Query(default=50, ge=1, le=200)):
-    """sentiment가 NULL인 기사 재분석 트리거 (백그라운드)"""
-    asyncio.create_task(reanalyze_unanalyzed(limit))
-    return {"triggered": True}
+@router.get("/jobs/{job_id}", dependencies=[Depends(_require_admin)])
+async def get_job_status(job_id: str):
+    """백그라운드 작업 상태 조회"""
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@router.post("/analyze", dependencies=[Depends(_require_admin)])
+@limiter.limit("10/minute")
+async def analyze_single(request: Request, body: AnalyzeRequest):
+    """단일 뉴스 분석 (GenAI 서버 - 요약 + 감성)"""
+    enriched = await analyze_news_batch([{
+        "link": body.source_url,
+        "title": body.headline,
+        "content": body.content or "",
+        "tickers": body.tickers or [],
+    }])
+    return enriched[0].get("enrichment") if enriched else _unavailable("분석 실패")
 
 
 @router.get("/analyze/latest", dependencies=[Depends(_require_admin)])
-async def analyze_latest(limit: int = Query(default=10, ge=1, le=50)):
+@limiter.limit("5/minute")
+async def analyze_latest(request: Request, limit: int = Query(default=10, ge=1, le=50)):
     """최신 뉴스 일괄 분석 (GenAI)"""
     result = await asyncio.to_thread(
         lambda: supabase.table("news_articles")
@@ -143,7 +150,8 @@ async def analyze_latest(limit: int = Query(default=10, ge=1, le=50)):
 
 
 @router.post("/diagnose", dependencies=[Depends(_require_admin)])
-async def diagnose_article(body: DiagnoseRequest):
+@limiter.limit("10/minute")
+async def diagnose_article(request: Request, body: DiagnoseRequest):
     """특정 기사를 GenAI에 직접 제출 → process-next 원본 응답 전체 반환 (실패 원인 진단용)"""
     url = body.source_url.rstrip("/")
 
@@ -164,9 +172,7 @@ async def diagnose_article(body: DiagnoseRequest):
     summary = (article.get("summary") or "").strip()
 
     ok = await submit_article(
-        news_id=url,
-        title=title,
-        link=url,
+        news_id=url, title=title, link=url,
         article_text=content or None,
         summary_text=summary or None,
     )
@@ -190,3 +196,37 @@ async def diagnose_article(body: DiagnoseRequest):
         await asyncio.sleep(0.1)
 
     raise HTTPException(status_code=504, detail="30회 시도 후 결과 없음")
+
+
+# ── 공개 엔드포인트 ────────────────────────────────────────────
+
+@router.get("/latest")
+@limiter.limit("30/minute")
+async def get_latest_news(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """최신 뉴스 조회 (캐시 30초)"""
+    cache_key = f"latest:{limit}:{offset}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    result = await asyncio.to_thread(
+        lambda: supabase.table("news_articles")
+            .select("*")
+            .order("published_at", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
+    )
+    response = {"count": len(result.data), "offset": offset, "data": result.data}
+    cache_set(cache_key, response, ttl_seconds=30)
+    return response
+
+
+@router.get("/genai/health")
+@limiter.limit("10/minute")
+async def genai_health(request: Request):
+    """GenAI 서버 상태 확인"""
+    return await check_genai_health()

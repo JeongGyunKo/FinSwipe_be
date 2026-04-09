@@ -100,6 +100,13 @@ def get_finlight_client() -> httpx.AsyncClient:
     return _finlight_client
 
 
+async def close_finlight_client() -> None:
+    global _finlight_client
+    if _finlight_client is not None:
+        await _finlight_client.aclose()
+        _finlight_client = None
+
+
 async def _fetch_single_query(query: str, page_size: int = 100) -> list[dict]:
     try:
         response = await get_finlight_client().post(
@@ -332,7 +339,7 @@ async def collect_market_news() -> dict:
 
 def _fetch_unanalyzed(limit: int) -> list[dict]:
     result = supabase_admin.table("news_articles")\
-        .select("*")\
+        .select("id, source_url, headline, content, summary, tickers")\
         .is_("sentiment_label", "null")\
         .order("published_at", desc=True)\
         .limit(limit)\
@@ -340,13 +347,22 @@ def _fetch_unanalyzed(limit: int) -> list[dict]:
     return result.data
 
 
-async def reanalyze_unanalyzed(limit: int = 50) -> None:
+async def reanalyze_unanalyzed(limit: int = 50, job_id: str | None = None) -> None:
     """sentiment가 NULL인 기사 재분석 (스케줄러용)"""
+    from app.core.jobs import start_job, finish_job, fail_job
     try:
+        if job_id:
+            start_job(job_id)
         articles = await asyncio.to_thread(_fetch_unanalyzed, limit)
         if not articles:
+            if job_id:
+                finish_job(job_id, {"analyzed": 0, "message": "미분석 기사 없음"})
             return
         logger.info(f"[재분석] 미분석 기사 {len(articles)}개 발견 → 분석 시작")
         await analyze_and_update(articles)
+        if job_id:
+            finish_job(job_id, {"analyzed": len(articles)})
     except Exception as e:
         logger.error(f"[재분석] 오류: {type(e).__name__}: {e}")
+        if job_id:
+            fail_job(job_id, str(e))
