@@ -73,6 +73,14 @@ COLLECTION_QUERIES = [
     "telecom AT&T Verizon T-Mobile wireless",
     "REIT real estate Prologis Simon Property AvalonBay",
     "transportation logistics UPS FedEx Union Pacific",
+    # 경영/이벤트
+    "CEO CFO resignation appointed leadership departure executive",
+    "secondary offering dilution bankruptcy restructuring chapter 11",
+    "activist investor Carl Icahn Bill Ackman Elliott Management stake",
+    # 규제/법률
+    "antitrust DOJ SEC enforcement lawsuit regulatory probe fine",
+    # 유틸리티
+    "utility NextEra Duke Energy Dominion Southern Edison Exelon",
     # 시장 전반
     "S&P 500 nasdaq earnings season quarterly results",
     "stock rally selloff market correction rebound",
