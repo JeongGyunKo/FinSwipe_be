@@ -1,7 +1,9 @@
 import asyncio
+import logging
 import httpx
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
 _client: httpx.AsyncClient | None = None
 
 
@@ -52,7 +54,6 @@ async def submit_article(
     summary_text: str | None = None,
     tickers: list[str] | None = None,
 ) -> bool:
-    """기사를 GenAI 큐에 제출. 성공 시 True."""
     try:
         news_id = news_id.rstrip("/")
         link = link.rstrip("/")
@@ -67,12 +68,11 @@ async def submit_article(
         resp = await get_client().post("/api/v1/articles/enrich-text", json=payload)
         return resp.status_code in (200, 202)
     except Exception as e:
-        print(f"[GenAI] 제출 실패: {news_id[:60]} | {e}")
+        logger.error(f"[GenAI] 제출 실패: {news_id[:60]} | {e}")
         return False
 
 
 def _parse_storage_payload(enrichment: dict) -> dict:
-    """EnrichmentStoragePayload → 우리 포맷으로 변환 (process-next 응답에서 직접)"""
     sentiment_raw = enrichment.get("sentiment") or {}
     sentiment = None
     if sentiment_raw.get("label"):
@@ -122,8 +122,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
         if (a.get("link") or a.get("source_url") or "").startswith("http")
     ]
 
-    # 제출
-    submitted_map: dict[str, dict] = {}  # normalized news_id → article
+    submitted_map: dict[str, dict] = {}
     for a in valid:
         link = (a.get("link") or a.get("source_url") or "").rstrip("/")
         ok = await submit_article(
@@ -137,9 +136,8 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
         if ok:
             submitted_map[link] = a
 
-    print(f"[GenAI] 제출 완료 {len(submitted_map)}개, 큐 처리 시작...")
+    logger.info(f"[GenAI] 제출 완료 {len(submitted_map)}개, 큐 처리 시작...")
 
-    # process-next 응답에서 직접 결과 수집 (fetch_result 불필요)
     results: dict[str, dict] = {}
     remaining = set(submitted_map.keys())
 
@@ -148,7 +146,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
             resp = await get_client().post("/api/v1/jobs/process-next")
             data = resp.json()
             if not data.get("processed", False):
-                print(f"[GenAI] 큐 소진 (총 {i}개 처리)")
+                logger.info(f"[GenAI] 큐 소진 (총 {i}개 처리)")
                 break
 
             p_id = (data.get("news_id") or "").rstrip("/")
@@ -156,40 +154,28 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
             enrichment = data.get("enrichment")
 
             if p_id not in remaining:
-                # 제출한 기사가 아닌 경우 - ID 불일치 디버그
-                print(f"[GenAI] 큐에서 처리됐지만 우리 목록에 없음: {p_id[:80]}")
-                if remaining:
-                    sample = list(remaining)[0]
-                    print(f"  ↳ remaining 샘플: {sample[:80]}")
+                logger.debug(f"[GenAI] 큐에서 처리됐지만 우리 목록에 없음: {p_id[:80]}")
 
             if p_id in remaining:
                 remaining.discard(p_id)
                 if enrichment and p_outcome in ("success", "partial_success"):
                     results[p_id] = _parse_storage_payload(enrichment)
-                    print(f"[GenAI] 결과 수집: {p_id[:60]} outcome={p_outcome}")
+                    logger.info(f"[GenAI] 결과 수집: {p_id[:60]} outcome={p_outcome}")
                 else:
                     results[p_id] = _unavailable(f"처리 실패: {p_outcome}")
-                    print(f"[GenAI] 실패: {p_id[:60]} outcome={p_outcome}")
-                    # 실패 원인 상세 로깅
+                    logger.warning(f"[GenAI] 실패: {p_id[:60]} outcome={p_outcome}")
                     if enrichment:
-                        stage_statuses = enrichment.get("stage_statuses") or {}
-                        errors = enrichment.get("errors") or []
-                        print(f"  ↳ stage_statuses: {stage_statuses}")
-                        if errors:
-                            print(f"  ↳ errors: {errors}")
-                    else:
-                        print(f"  ↳ enrichment 없음 (process-next 응답에 enrichment 필드 누락)")
+                        logger.debug(f"  ↳ stage_statuses={enrichment.get('stage_statuses')} errors={enrichment.get('errors')}")
 
                 if not remaining:
-                    print(f"[GenAI] 목표 기사 전부 완료 (총 {i+1}개 처리)")
+                    logger.info(f"[GenAI] 목표 기사 전부 완료 (총 {i+1}개 처리)")
                     break
         except Exception as e:
-            print(f"[GenAI] process-next 오류: {e}")
+            logger.error(f"[GenAI] process-next 오류: {e}")
             break
 
-    # 큐 소진 후에도 남은 기사 → 1회 재제출 후 재처리
     if remaining:
-        print(f"[GenAI] 큐 소진 후 미처리 {len(remaining)}개 → 재제출 시도...")
+        logger.warning(f"[GenAI] 큐 소진 후 미처리 {len(remaining)}개 → 재제출 시도...")
         resubmitted = set()
         for link in remaining:
             a = submitted_map[link]
@@ -203,11 +189,10 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
             )
             if ok:
                 resubmitted.add(link)
-                print(f"[GenAI] 재제출 성공: {link[:60]}")
+                logger.info(f"[GenAI] 재제출 성공: {link[:60]}")
             else:
-                print(f"[GenAI] 재제출 실패: {link[:60]}")
+                logger.warning(f"[GenAI] 재제출 실패: {link[:60]}")
 
-        # 재제출된 기사만 다시 process-next
         remaining2 = resubmitted.copy()
         for i in range(len(resubmitted) * 3 + 10):
             if not remaining2:
@@ -216,7 +201,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                 resp = await get_client().post("/api/v1/jobs/process-next")
                 data = resp.json()
                 if not data.get("processed", False):
-                    print(f"[GenAI] 재처리 큐 소진 (총 {i}개 처리)")
+                    logger.info(f"[GenAI] 재처리 큐 소진 (총 {i}개 처리)")
                     break
                 p_id = (data.get("news_id") or "").rstrip("/")
                 p_outcome = data.get("analysis_outcome")
@@ -225,15 +210,14 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                     remaining2.discard(p_id)
                     if enrichment and p_outcome in ("success", "partial_success"):
                         results[p_id] = _parse_storage_payload(enrichment)
-                        print(f"[GenAI] 재처리 결과 수집: {p_id[:60]} outcome={p_outcome}")
+                        logger.info(f"[GenAI] 재처리 결과 수집: {p_id[:60]} outcome={p_outcome}")
                     else:
                         results[p_id] = _unavailable(f"재처리 실패: {p_outcome}")
-                        print(f"[GenAI] 재처리 실패: {p_id[:60]} outcome={p_outcome}")
+                        logger.warning(f"[GenAI] 재처리 실패: {p_id[:60]} outcome={p_outcome}")
             except Exception as e:
-                print(f"[GenAI] 재처리 오류: {e}")
+                logger.error(f"[GenAI] 재처리 오류: {e}")
                 break
 
-    # 결과 미수집 기사 처리
     output = []
     for a in valid:
         link = (a.get("link") or a.get("source_url") or "").rstrip("/")

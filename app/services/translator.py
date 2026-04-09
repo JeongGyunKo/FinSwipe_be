@@ -1,6 +1,8 @@
+import logging
 import httpx
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
 DEEPL_URL = "https://api-free.deepl.com/v2/translate"
 
 _client: httpx.AsyncClient | None = None
@@ -28,27 +30,22 @@ async def translate_texts(texts: list[str]) -> list[str]:
     if not texts:
         return texts
     if not settings.deepl_api_key:
-        print("[DeepL] API 키 없음 → 번역 스킵")
+        logger.warning("[DeepL] API 키 없음 → 번역 스킵")
         return texts
 
     try:
         resp = await get_client().post(
             DEEPL_URL,
-            json={
-                "text": texts,
-                "target_lang": "KO",
-                "source_lang": "EN",
-            },
+            json={"text": texts, "target_lang": "KO", "source_lang": "EN"},
         )
-        print(f"[DeepL] 응답 status={resp.status_code}")
         if resp.status_code != 200:
-            print(f"[DeepL] 에러 응답: {resp.text[:200]}")
+            logger.error(f"[DeepL] 에러 응답 status={resp.status_code}: {resp.text[:200]}")
             return texts
         translations = resp.json().get("translations", [])
-        print(f"[DeepL] 번역 완료 {len(translations)}개")
+        logger.info(f"[DeepL] 번역 완료 {len(translations)}개")
         return [t.get("text", original) for t, original in zip(translations, texts)]
     except Exception as e:
-        print(f"[DeepL] 번역 실패: {e}")
+        logger.error(f"[DeepL] 번역 실패: {e}")
         return texts
 
 

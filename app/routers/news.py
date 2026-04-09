@@ -1,12 +1,15 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.supabase import supabase_admin as supabase
-from app.services.news_collector import collect_market_news, analyze_and_update, reanalyze_unanalyzed
+from app.services.news_collector import collect_market_news, reanalyze_unanalyzed
 from app.services.analyzer import analyze_news_batch, check_genai_health, submit_article, get_client, _unavailable
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _api_key_header = APIKeyHeader(name="X-Admin-Key", auto_error=False)
@@ -43,7 +46,8 @@ async def collect_news():
 
 
 @router.get("/latest")
-async def get_latest_news(limit: int = Query(default=20, ge=1, le=100)):
+@limiter.limit("30/minute")
+async def get_latest_news(request: Request, limit: int = Query(default=20, ge=1, le=100)):
     """최신 뉴스 조회"""
     result = await asyncio.to_thread(
         lambda: supabase.table("news_articles")
@@ -56,7 +60,8 @@ async def get_latest_news(limit: int = Query(default=20, ge=1, le=100)):
 
 
 @router.get("/genai/health")
-async def genai_health():
+@limiter.limit("10/minute")
+async def genai_health(request: Request):
     """GenAI 서버 상태 확인"""
     return await check_genai_health()
 
@@ -109,8 +114,8 @@ async def translate_all_articles():
                 success += 1
             except Exception as e:
                 failed += 1
-                print(f"[번역] 실패 ({article.get('source_url', '')[:50]}): {e}")
-        print(f"[번역] 완료 → 성공 {success}개 / 실패 {failed}개")
+                logger.error(f"[번역] 실패 ({article.get('source_url', '')[:50]}): {e}")
+        logger.info(f"[번역] 완료 → 성공 {success}개 / 실패 {failed}개")
 
     asyncio.create_task(_translate_all())
     return {"triggered": len(articles), "message": f"{len(articles)}개 번역 시작 (백그라운드)"}
@@ -151,7 +156,7 @@ async def diagnose_article(body: DiagnoseRequest):
 
     data = await asyncio.to_thread(_fetch_article)
     if not data:
-        return {"error": f"DB에서 기사를 찾을 수 없음: {url}"}
+        raise HTTPException(status_code=404, detail=f"DB에서 기사를 찾을 수 없음: {url}")
 
     article = data[0]
     title = article.get("headline") or ""
@@ -166,19 +171,14 @@ async def diagnose_article(body: DiagnoseRequest):
         summary_text=summary or None,
     )
     if not ok:
-        return {"error": "GenAI 제출 실패 (HTTP 오류)"}
+        raise HTTPException(status_code=502, detail="GenAI 제출 실패 (HTTP 오류)")
 
     client = get_client()
     for i in range(30):
         resp = await client.post("/api/v1/jobs/process-next")
         data = resp.json()
         if not data.get("processed", False):
-            return {
-                "submitted": True,
-                "result": "큐 소진 — 기사가 처리되지 않음",
-                "attempts": i,
-                "article_info": {"url": url, "title": title, "content_length": len(content)},
-            }
+            raise HTTPException(status_code=504, detail=f"큐 소진 — 기사가 처리되지 않음 (시도 {i}회)")
         p_id = (data.get("news_id") or "").rstrip("/")
         if p_id == url:
             return {
@@ -189,4 +189,4 @@ async def diagnose_article(body: DiagnoseRequest):
             }
         await asyncio.sleep(0.1)
 
-    return {"error": "30회 시도 후 결과 없음", "submitted": True}
+    raise HTTPException(status_code=504, detail="30회 시도 후 결과 없음")
