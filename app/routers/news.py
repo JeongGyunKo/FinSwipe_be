@@ -83,11 +83,11 @@ async def translate_all_articles(request: Request):
 
     job_id = create_job("translate-all")
 
-    def _db_update_translation(article_id: str, headline_ko: str, summary_3lines_ko: list, xai: dict | None) -> None:
+    def _db_update_translation(article_id: str, headline_ko: str, summary_3lines_ko: list, xai_ko: list | None) -> None:
         supabase.table("news_articles").update({
             "headline_ko": headline_ko,
             "summary_3lines_ko": summary_3lines_ko,
-            "xai": xai,
+            "xai_ko": xai_ko,
         }).eq("id", article_id).execute()
 
     async def _translate_all():
@@ -101,8 +101,8 @@ async def translate_all_articles(request: Request):
                 if not headline and not summary_3lines:
                     continue
                 headline_ko, summary_3lines_ko = await translate_article(headline, summary_3lines)
-                xai = await translate_xai_highlights(article.get("xai"))
-                await asyncio.to_thread(_db_update_translation, article["id"], headline_ko, summary_3lines_ko, xai)
+                xai_ko = await translate_xai_highlights(article.get("xai"))
+                await asyncio.to_thread(_db_update_translation, article["id"], headline_ko, summary_3lines_ko, xai_ko)
                 success += 1
             except Exception as e:
                 failed += 1

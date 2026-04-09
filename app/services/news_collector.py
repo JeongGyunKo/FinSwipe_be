@@ -278,13 +278,14 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                 summary_3lines = enrichment.get("summary_3lines") or []
 
                 headline_ko, summary_3lines_ko = await translate_article(headline, summary_3lines)
-                xai = await translate_xai_highlights(enrichment.get("xai"))
+                xai_ko = await translate_xai_highlights(enrichment.get("xai"))
 
                 update_data = {
                     "sentiment_label": sentiment.get("label"),
                     "sentiment_score": sentiment.get("score"),
                     "summary_3lines": summary_3lines,
-                    "xai": xai,
+                    "xai": enrichment.get("xai"),
+                    "xai_ko": xai_ko,
                     "headline_ko": headline_ko,
                     "summary_3lines_ko": summary_3lines_ko,
                 }
