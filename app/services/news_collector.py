@@ -39,13 +39,23 @@ def _filter_tickers(companies: list) -> list[str]:
 
 
 COLLECTION_QUERIES = [
-    "stock market earnings revenue",
-    "Federal Reserve interest rates inflation",
-    "tech stocks Apple Microsoft Google",
-    "oil energy commodities",
-    "IPO merger acquisition",
-    "S&P 500 nasdaq dow jones",
-    "forex dollar economy",
+    # 실적/이벤트 (ticker 밀도 최고)
+    "earnings beat revenue guidance outlook",
+    "analyst rating upgrade downgrade price target",
+    "IPO merger acquisition deal buyout",
+    "dividend buyback shareholder stock split",
+    # 섹터별
+    "tech stocks Apple Microsoft Google Meta Amazon",
+    "semiconductor nvidia AMD intel TSMC Qualcomm",
+    "healthcare pharma biotech FDA approval clinical",
+    "financial banking JPMorgan Goldman Wells Fargo",
+    "energy oil gas Exxon Chevron ConocoPhillips",
+    "consumer retail Walmart Target Costco Nike",
+    "EV electric vehicle Tesla Rivian Ford GM",
+    "industrial aerospace defense Boeing Lockheed",
+    # 시장 전반
+    "S&P 500 nasdaq earnings season quarterly results",
+    "stock rally selloff market correction rebound",
 ]
 
 _finlight_client: httpx.AsyncClient | None = None
