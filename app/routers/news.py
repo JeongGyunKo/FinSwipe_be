@@ -134,6 +134,9 @@ async def backfill_xai_ko(request: Request):
 
     job_id = create_job("backfill-xai-ko")
 
+    def _db_update_xai_ko(article_id: str, xai_ko: list | None) -> None:
+        supabase.table("news_articles").update({"xai_ko": xai_ko}).eq("id", article_id).execute()
+
     async def _backfill():
         start_job(job_id)
         success = 0
@@ -141,12 +144,7 @@ async def backfill_xai_ko(request: Request):
         for article in articles:
             try:
                 xai_ko = await translate_xai_highlights(article.get("xai"))
-                await asyncio.to_thread(
-                    lambda: supabase.table("news_articles")
-                        .update({"xai_ko": xai_ko})
-                        .eq("id", article["id"])
-                        .execute()
-                )
+                await asyncio.to_thread(_db_update_xai_ko, article["id"], xai_ko)
                 success += 1
             except Exception as e:
                 failed += 1
