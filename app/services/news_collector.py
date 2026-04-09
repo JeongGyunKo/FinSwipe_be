@@ -44,15 +44,35 @@ COLLECTION_QUERIES = [
     "analyst rating upgrade downgrade price target",
     "IPO merger acquisition deal buyout",
     "dividend buyback shareholder stock split",
-    # 섹터별
+    "earnings per share EPS beat miss quarterly results",
+    "short squeeze insider buying SEC filing 13F",
+    # 테크/성장
     "tech stocks Apple Microsoft Google Meta Amazon",
     "semiconductor nvidia AMD intel TSMC Qualcomm",
+    "software cloud SaaS Salesforce Oracle Snowflake ServiceNow",
+    "AI artificial intelligence OpenAI Palantir C3.ai",
+    "cybersecurity CrowdStrike Palo Alto Fortinet Zscaler",
+    "streaming media Netflix Disney Comcast Warner",
+    "gaming entertainment Activision EA Take-Two Roblox",
+    # 헬스케어
     "healthcare pharma biotech FDA approval clinical",
+    "medical device insurance UnitedHealth Humana CVS",
+    # 금융
     "financial banking JPMorgan Goldman Wells Fargo",
+    "fintech payment Visa Mastercard PayPal Block Square",
+    # 에너지/소재
     "energy oil gas Exxon Chevron ConocoPhillips",
+    "materials mining copper gold Freeport Newmont Nucor",
+    # 소비재/유통
     "consumer retail Walmart Target Costco Nike",
+    "food beverage Coca-Cola PepsiCo McDonald's Starbucks",
+    "travel hospitality Airbnb Marriott Hilton Booking",
+    # 산업재/기타
     "EV electric vehicle Tesla Rivian Ford GM",
-    "industrial aerospace defense Boeing Lockheed",
+    "industrial aerospace defense Boeing Lockheed Raytheon",
+    "telecom AT&T Verizon T-Mobile wireless",
+    "REIT real estate Prologis Simon Property AvalonBay",
+    "transportation logistics UPS FedEx Union Pacific",
     # 시장 전반
     "S&P 500 nasdaq earnings season quarterly results",
     "stock rally selloff market correction rebound",
