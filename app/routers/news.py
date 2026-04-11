@@ -10,6 +10,7 @@ from app.core.limiter import limiter
 from app.core.supabase import supabase_admin as supabase
 from app.services.news_collector import collect_market_news, reanalyze_unanalyzed
 from app.services.analyzer import analyze_news_batch, check_genai_health, submit_article, get_client, _unavailable
+from app.services.ticker_names import enrich_tickers, search_tickers, TICKER_NAMES
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -244,6 +245,14 @@ async def diagnose_article(request: Request, body: DiagnoseRequest):
 
 # ── 공개 엔드포인트 ────────────────────────────────────────────
 
+def _attach_ticker_names(articles: list[dict]) -> list[dict]:
+    """각 기사의 tickers 배열에 회사명을 추가해 ticker_names 필드로 반환"""
+    for article in articles:
+        tickers = article.get("tickers") or []
+        article["ticker_names"] = enrich_tickers(tickers)
+    return articles
+
+
 @router.get("/latest")
 @limiter.limit("30/minute")
 async def get_latest_news(
@@ -264,9 +273,75 @@ async def get_latest_news(
             .range(offset, offset + limit - 1)
             .execute()
     )
-    response = {"count": len(result.data), "offset": offset, "data": result.data}
+    articles = _attach_ticker_names(result.data)
+    response = {"count": len(articles), "offset": offset, "data": articles}
     cache_set(cache_key, response, ttl_seconds=30)
     return response
+
+
+@router.get("/search")
+@limiter.limit("30/minute")
+async def search_news(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=100),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """
+    한국어/영문 회사명 또는 티커로 뉴스 검색.
+    예: ?q=애플  ?q=AAPL  ?q=nvidia
+    """
+    cache_key = f"search:{q}:{limit}:{offset}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    # 1) 입력값이 티커 자체인지 먼저 확인 (AAPL 등)
+    q_upper = q.strip().upper()
+    if q_upper in TICKER_NAMES:
+        matched_tickers = [q_upper]
+    else:
+        # 2) 한국어/영문 회사명으로 티커 검색
+        matched_tickers = search_tickers(q)
+
+    if not matched_tickers:
+        response = {"count": 0, "offset": offset, "query": q, "matched_tickers": [], "data": []}
+        cache_set(cache_key, response, ttl_seconds=30)
+        return response
+
+    # 3) 매칭된 티커 중 하나라도 포함된 기사 조회
+    # Supabase array overlap: tickers && ARRAY['AAPL','APPL']
+    ticker_filter = "{" + ",".join(matched_tickers) + "}"
+
+    result = await asyncio.to_thread(
+        lambda: supabase.table("news_articles")
+            .select("*")
+            .overlaps("tickers", ticker_filter)
+            .order("published_at", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
+    )
+    articles = _attach_ticker_names(result.data)
+    response = {
+        "count": len(articles),
+        "offset": offset,
+        "query": q,
+        "matched_tickers": matched_tickers,
+        "data": articles,
+    }
+    cache_set(cache_key, response, ttl_seconds=30)
+    return response
+
+
+@router.get("/tickers")
+@limiter.limit("30/minute")
+async def get_ticker_list(request: Request):
+    """지원하는 전체 티커 목록 반환 (FE 검색 자동완성용)"""
+    data = [
+        {"ticker": ticker, **names}
+        for ticker, names in TICKER_NAMES.items()
+    ]
+    return {"count": len(data), "data": data}
 
 
 @router.get("/genai/health")
