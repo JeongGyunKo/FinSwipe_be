@@ -196,3 +196,10 @@ def search_tickers(query: str) -> list[str]:
         for ticker, names in TICKER_NAMES.items()
         if q in names["ko"].lower() or q in names["corp"].lower() or q in ticker.lower()
     ]
+
+
+# /tickers 엔드포인트용 정적 응답 — 앱 시작 시 한 번만 빌드
+TICKER_LIST: list[dict[str, str]] = [
+    {"ticker": ticker, **names}
+    for ticker, names in TICKER_NAMES.items()
+]

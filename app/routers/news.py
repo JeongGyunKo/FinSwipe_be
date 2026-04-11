@@ -5,12 +5,13 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from app.core.cache import cache_get, cache_set
 from app.core.config import settings
-from app.core.jobs import create_job, get_job
+from app.core.jobs import create_job, get_job, start_job, finish_job
 from app.core.limiter import limiter
 from app.core.supabase import supabase_admin as supabase
 from app.services.news_collector import collect_market_news, reanalyze_unanalyzed
 from app.services.analyzer import analyze_news_batch, check_genai_health, submit_article, get_client, _unavailable
-from app.services.ticker_names import enrich_tickers, search_tickers, TICKER_NAMES
+from app.services.ticker_names import enrich_tickers, search_tickers, TICKER_NAMES, TICKER_LIST
+from app.services.translator import translate_article, translate_xai_highlights
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -68,9 +69,6 @@ async def reanalyze_endpoint(
 @limiter.limit("2/minute")
 async def translate_all_articles(request: Request):
     """번역 안 된 기사 전체 번역 (백그라운드) — job_id로 상태 조회 가능"""
-    from app.core.jobs import start_job, finish_job, fail_job
-    from app.services.translator import translate_article, translate_xai_highlights
-
     result = await asyncio.to_thread(
         lambda: supabase.table("news_articles")
             .select("id, headline, summary_3lines, xai, source_url")
@@ -91,23 +89,27 @@ async def translate_all_articles(request: Request):
             "xai_ko": xai_ko,
         }).eq("id", article_id).execute()
 
-    async def _translate_all():
-        start_job(job_id)
-        success = 0
-        failed = 0
-        for article in articles:
+    async def _translate_one(article: dict, sem: asyncio.Semaphore) -> bool:
+        async with sem:
             try:
                 headline = article.get("headline") or ""
                 summary_3lines = article.get("summary_3lines") or []
                 if not headline and not summary_3lines:
-                    continue
+                    return False
                 headline_ko, summary_3lines_ko = await translate_article(headline, summary_3lines)
                 xai_ko = await translate_xai_highlights(article.get("xai"))
                 await asyncio.to_thread(_db_update_translation, article["id"], headline_ko, summary_3lines_ko, xai_ko)
-                success += 1
+                return True
             except Exception as e:
-                failed += 1
                 logger.error(f"[번역] 실패 ({article.get('source_url', '')[:50]}): {e}")
+                return False
+
+    async def _translate_all():
+        start_job(job_id)
+        sem = asyncio.Semaphore(5)
+        results = await asyncio.gather(*[_translate_one(a, sem) for a in articles])
+        success = sum(results)
+        failed = len(results) - success
         logger.info(f"[번역] 완료 → 성공 {success}개 / 실패 {failed}개")
         finish_job(job_id, {"success": success, "failed": failed})
 
@@ -119,9 +121,6 @@ async def translate_all_articles(request: Request):
 @limiter.limit("2/minute")
 async def backfill_xai_ko(request: Request):
     """xai는 있지만 xai_ko가 없는 기사 일괄 번역 (백그라운드)"""
-    from app.core.jobs import start_job, finish_job
-    from app.services.translator import translate_xai_highlights
-
     result = await asyncio.to_thread(
         lambda: supabase.table("news_articles")
             .select("id, xai, source_url")
@@ -138,18 +137,22 @@ async def backfill_xai_ko(request: Request):
     def _db_update_xai_ko(article_id: str, xai_ko: list | None) -> None:
         supabase.table("news_articles").update({"xai_ko": xai_ko}).eq("id", article_id).execute()
 
-    async def _backfill():
-        start_job(job_id)
-        success = 0
-        failed = 0
-        for article in articles:
+    async def _backfill_one(article: dict, sem: asyncio.Semaphore) -> bool:
+        async with sem:
             try:
                 xai_ko = await translate_xai_highlights(article.get("xai"))
                 await asyncio.to_thread(_db_update_xai_ko, article["id"], xai_ko)
-                success += 1
+                return True
             except Exception as e:
-                failed += 1
                 logger.error(f"[xai_ko backfill] 실패 ({article.get('source_url', '')[:50]}): {e}")
+                return False
+
+    async def _backfill():
+        start_job(job_id)
+        sem = asyncio.Semaphore(5)
+        results = await asyncio.gather(*[_backfill_one(a, sem) for a in articles])
+        success = sum(results)
+        failed = len(results) - success
         logger.info(f"[xai_ko backfill] 완료 → 성공 {success}개 / 실패 {failed}개")
         finish_job(job_id, {"success": success, "failed": failed})
 
@@ -337,11 +340,7 @@ async def search_news(
 @limiter.limit("30/minute")
 async def get_ticker_list(request: Request):
     """지원하는 전체 티커 목록 반환 (FE 검색 자동완성용)"""
-    data = [
-        {"ticker": ticker, **names}
-        for ticker, names in TICKER_NAMES.items()
-    ]
-    return {"count": len(data), "data": data}
+    return {"count": len(TICKER_LIST), "data": TICKER_LIST}
 
 
 @router.get("/genai/health")

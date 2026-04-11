@@ -1,8 +1,12 @@
 import asyncio
 import logging
+from datetime import datetime, timezone, timedelta
 import httpx
 from app.core.config import settings
+from app.core.jobs import start_job, finish_job, fail_job
 from app.core.supabase import supabase_admin
+from app.services.analyzer import analyze_news_batch
+from app.services.translator import translate_article, translate_xai_highlights
 
 logger = logging.getLogger(__name__)
 _analysis_lock = asyncio.Lock()
@@ -144,9 +148,15 @@ async def fetch_news_from_finlight() -> list[dict]:
                 seen.add(link)
                 all_articles.append(a)
 
-    with_content = [a for a in all_articles if a.get("content")]
-    with_tickers = [a for a in with_content if a.get("companies")]
-    logger.info(f"[Finlight] 수집 {len(all_articles)}개 → content {len(with_content)}개 → ticker 있음 {len(with_tickers)}개")
+    with_tickers = []
+    content_count = 0
+    for a in all_articles:
+        if not a.get("content"):
+            continue
+        content_count += 1
+        if a.get("companies"):
+            with_tickers.append(a)
+    logger.info(f"[Finlight] 수집 {len(all_articles)}개 → content {content_count}개 → ticker 있음 {len(with_tickers)}개")
 
     links = [a["link"] for a in with_tickers]
     new_links = await asyncio.to_thread(_filter_new_links, links)
@@ -244,8 +254,6 @@ def _db_update_article(update_data: dict, link: str) -> int:
 
 
 async def _do_analyze_and_update(articles: list[dict]) -> None:
-    from app.services.analyzer import analyze_news_batch
-    from app.services.translator import translate_article, translate_xai_highlights
 
     try:
         logger.info(f"[백그라운드] GenAI 분석 시작 → {len(articles)}개")
@@ -277,8 +285,10 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                 headline = article.get("headline") or article.get("title") or ""
                 summary_3lines = enrichment.get("summary_3lines") or []
 
-                headline_ko, summary_3lines_ko = await translate_article(headline, summary_3lines)
-                xai_ko = await translate_xai_highlights(enrichment.get("xai"))
+                (headline_ko, summary_3lines_ko), xai_ko = await asyncio.gather(
+                    translate_article(headline, summary_3lines),
+                    translate_xai_highlights(enrichment.get("xai")),
+                )
 
                 update_data = {
                     "sentiment_label": sentiment.get("label"),
@@ -305,8 +315,6 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
 def cleanup_old_content() -> None:
     """48시간 지난 기사 삭제 + content NULL 기사 삭제"""
     try:
-        from datetime import datetime, timezone, timedelta
-
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
         supabase_admin.table("news_articles").delete().lt("created_at", cutoff).execute()
         supabase_admin.table("news_articles").delete().is_("content", "null").execute()
@@ -351,7 +359,6 @@ def _fetch_unanalyzed(limit: int) -> list[dict]:
 
 async def reanalyze_unanalyzed(limit: int = 50, job_id: str | None = None) -> None:
     """sentiment가 NULL인 기사 재분석 (스케줄러용)"""
-    from app.core.jobs import start_job, finish_job, fail_job
     try:
         if job_id:
             start_job(job_id)
