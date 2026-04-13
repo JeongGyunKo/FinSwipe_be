@@ -135,8 +135,14 @@ async def _fetch_single_query(query: str, page_size: int = 100) -> list[dict]:
 
 async def fetch_news_from_finlight() -> list[dict]:
     """여러 쿼리 병렬 수집 → content 있는 새 기사만 반환"""
+    sem = asyncio.Semaphore(5)  # Finlight 동시 요청 5개로 제한
+
+    async def _fetch_with_sem(q: str) -> list[dict]:
+        async with sem:
+            return await _fetch_single_query(q)
+
     results = await asyncio.gather(*[
-        _fetch_single_query(q) for q in COLLECTION_QUERIES
+        _fetch_with_sem(q) for q in COLLECTION_QUERIES
     ])
 
     seen = set()
