@@ -284,14 +284,12 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
 
 
 def cleanup_old_content() -> None:
-    """48시간 지난 기사 삭제 + content NULL 기사 삭제"""
+    """content NULL 또는 tickers 없는 기사 삭제"""
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
-        supabase_admin.table("news_articles").delete().lt("created_at", cutoff).execute()
         supabase_admin.table("news_articles").delete().is_("content", "null").execute()
         supabase_admin.table("news_articles").delete().eq("tickers", "{}").execute()
 
-        logger.info("[정리] 48시간 이상 된 기사 및 content/tickers 없는 기사 삭제 완료")
+        logger.info("[정리] content/tickers 없는 기사 삭제 완료")
     except Exception as e:
         logger.error(f"[정리] 삭제 실패: {e}")
 
