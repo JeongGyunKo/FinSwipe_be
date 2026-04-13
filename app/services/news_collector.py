@@ -6,7 +6,6 @@ from app.core.config import settings
 from app.core.jobs import start_job, finish_job, fail_job
 from app.core.supabase import supabase_admin
 from app.services.analyzer import analyze_news_batch
-from app.services.translator import translate_article, translate_xai_highlights
 
 logger = logging.getLogger(__name__)
 _analysis_lock = asyncio.Lock()
@@ -253,22 +252,11 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                 continue
 
             try:
-                headline = article.get("headline") or article.get("title") or ""
-                summary_3lines = enrichment.get("summary_3lines") or []
-
-                (headline_ko, summary_3lines_ko), xai_ko = await asyncio.gather(
-                    translate_article(headline, summary_3lines),
-                    translate_xai_highlights(enrichment.get("xai")),
-                )
-
                 update_data = {
                     "sentiment_label": sentiment.get("label"),
                     "sentiment_score": sentiment.get("score"),
-                    "summary_3lines": summary_3lines,
+                    "summary_3lines": enrichment.get("summary_3lines") or [],
                     "xai": enrichment.get("xai"),
-                    "xai_ko": xai_ko,
-                    "headline_ko": headline_ko,
-                    "summary_3lines_ko": summary_3lines_ko,
                 }
                 rows = await asyncio.to_thread(_db_update_article, update_data, link)
                 logger.info(f"[DB] 업데이트: {link[:60]} → label={sentiment.get('label')} rows={rows}")

@@ -8,7 +8,7 @@ from app.core.limiter import limiter
 from app.core.supabase import supabase_admin
 from app.routers import news
 from app.scheduler import scheduler, start_scheduler
-from app.services import analyzer, translator
+from app.services import analyzer
 from app.services.news_collector import close_finlight_client
 
 logging.basicConfig(
@@ -30,7 +30,6 @@ async def lifespan(app: FastAPI):
         scheduler.shutdown(wait=False)
         logger.info("스케줄러 종료 완료")
     await analyzer.close_client()
-    await translator.close_client()
     await close_finlight_client()
     logger.info("모든 HTTP 클라이언트 종료 완료")
 
