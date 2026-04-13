@@ -43,51 +43,12 @@ def _filter_tickers(companies: list) -> list[str]:
 
 
 COLLECTION_QUERIES = [
-    # 실적/이벤트 (ticker 밀도 최고)
-    "earnings beat revenue guidance outlook",
-    "analyst rating upgrade downgrade price target",
-    "IPO merger acquisition deal buyout",
-    "dividend buyback shareholder stock split",
-    "earnings per share EPS beat miss quarterly results",
-    "short squeeze insider buying SEC filing 13F",
-    # 테크/성장
-    "tech stocks Apple Microsoft Google Meta Amazon",
-    "semiconductor nvidia AMD intel TSMC Qualcomm",
-    "software cloud SaaS Salesforce Oracle Snowflake ServiceNow",
-    "AI artificial intelligence OpenAI Palantir C3.ai",
-    "cybersecurity CrowdStrike Palo Alto Fortinet Zscaler",
-    "streaming media Netflix Disney Comcast Warner",
-    "gaming entertainment Activision EA Take-Two Roblox",
-    # 헬스케어
-    "healthcare pharma biotech FDA approval clinical",
-    "medical device insurance UnitedHealth Humana CVS",
-    # 금융
-    "financial banking JPMorgan Goldman Wells Fargo",
-    "fintech payment Visa Mastercard PayPal Block Square",
-    # 에너지/소재
-    "energy oil gas Exxon Chevron ConocoPhillips",
-    "materials mining copper gold Freeport Newmont Nucor",
-    # 소비재/유통
-    "consumer retail Walmart Target Costco Nike",
-    "food beverage Coca-Cola PepsiCo McDonald's Starbucks",
-    "travel hospitality Airbnb Marriott Hilton Booking",
-    # 산업재/기타
-    "EV electric vehicle Tesla Rivian Ford GM",
-    "industrial aerospace defense Boeing Lockheed Raytheon",
-    "telecom AT&T Verizon T-Mobile wireless",
-    "REIT real estate Prologis Simon Property AvalonBay",
-    "transportation logistics UPS FedEx Union Pacific",
-    # 경영/이벤트
-    "CEO CFO resignation appointed leadership departure executive",
-    "secondary offering dilution bankruptcy restructuring chapter 11",
-    "activist investor Carl Icahn Bill Ackman Elliott Management stake",
-    # 규제/법률
-    "antitrust DOJ SEC enforcement lawsuit regulatory probe fine",
-    # 유틸리티
-    "utility NextEra Duke Energy Dominion Southern Edison Exelon",
-    # 시장 전반
-    "S&P 500 nasdaq earnings season quarterly results",
-    "stock rally selloff market correction rebound",
+    # 실적/이벤트/경영 — ticker 밀도 최고
+    "earnings beat miss EPS revenue guidance analyst upgrade downgrade IPO merger acquisition buyback",
+    # 테크 대형주 + AI + 반도체 + 금융
+    "Apple Microsoft Google Meta Amazon Tesla nvidia AMD intel AI semiconductor JPMorgan Goldman Visa",
+    # 헬스케어 + 에너지 + 시장 전반
+    "pharma biotech FDA Pfizer Eli Lilly Exxon Chevron S&P 500 nasdaq stock rally selloff outlook",
 ]
 
 _finlight_client: httpx.AsyncClient | None = None
