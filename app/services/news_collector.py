@@ -73,38 +73,42 @@ async def close_finlight_client() -> None:
 
 
 async def _fetch_single_query(query: str, page_size: int = 100) -> list[dict]:
-    try:
-        response = await get_finlight_client().post(
-            "/v2/articles",
-            json={
-                "query": query,
-                "language": "en",
-                "pageSize": page_size,
-                "includeContent": True,
-                "includeEntities": True,
-            }
-        )
-        response.raise_for_status()
-        return response.json().get("articles", [])
-    except httpx.HTTPStatusError as e:
-        logger.error(f"[Finlight] {query[:20]} HTTP {e.response.status_code}")
-        return []
-    except Exception as e:
-        logger.error(f"[Finlight] {query[:20]} {type(e).__name__}: {e}")
-        return []
+    for attempt in range(4):
+        try:
+            response = await get_finlight_client().post(
+                "/v2/articles",
+                json={
+                    "query": query,
+                    "language": "en",
+                    "pageSize": page_size,
+                    "includeContent": True,
+                    "includeEntities": True,
+                }
+            )
+            if response.status_code == 429:
+                wait = 15 * (attempt + 1)  # 15s → 30s → 45s → 60s
+                logger.warning(f"[Finlight] {query[:20]} 429 → {wait}초 대기 후 재시도 ({attempt + 1}/4)")
+                await asyncio.sleep(wait)
+                continue
+            response.raise_for_status()
+            return response.json().get("articles", [])
+        except httpx.HTTPStatusError as e:
+            logger.error(f"[Finlight] {query[:20]} HTTP {e.response.status_code}")
+            return []
+        except Exception as e:
+            logger.error(f"[Finlight] {query[:20]} {type(e).__name__}: {e}")
+            return []
+    logger.error(f"[Finlight] {query[:20]} 4회 재시도 후 실패")
+    return []
 
 
 async def fetch_news_from_finlight() -> list[dict]:
-    """여러 쿼리 병렬 수집 → content 있는 새 기사만 반환"""
-    sem = asyncio.Semaphore(5)  # Finlight 동시 요청 5개로 제한
-
-    async def _fetch_with_sem(q: str) -> list[dict]:
-        async with sem:
-            return await _fetch_single_query(q)
-
-    results = await asyncio.gather(*[
-        _fetch_with_sem(q) for q in COLLECTION_QUERIES
-    ])
+    """쿼리 순차 수집 → content 있는 새 기사만 반환"""
+    results = []
+    for q in COLLECTION_QUERIES:
+        result = await _fetch_single_query(q)
+        results.append(result)
+        await asyncio.sleep(3)  # 쿼리 간 3초 간격
 
     seen = set()
     all_articles = []
