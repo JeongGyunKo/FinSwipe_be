@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.core.jobs import start_job, finish_job, fail_job
 from app.core.supabase import supabase_admin
 from app.services.analyzer import analyze_news_batch
+from app.services.ticker_names import TICKER_NAMES
 
 logger = logging.getLogger(__name__)
 _analysis_lock = asyncio.Lock()
@@ -41,15 +42,6 @@ def _filter_tickers(companies: list) -> list[str]:
     return result
 
 
-COLLECTION_QUERIES = [
-    # 실적/이벤트/경영 — ticker 밀도 최고
-    "earnings beat miss EPS revenue guidance analyst upgrade downgrade IPO merger acquisition buyback",
-    # 테크 대형주 + AI + 반도체 + 금융
-    "Apple Microsoft Google Meta Amazon Tesla nvidia AMD intel AI semiconductor JPMorgan Goldman Visa",
-    # 헬스케어 + 에너지 + 시장 전반
-    "pharma biotech FDA Pfizer Eli Lilly Exxon Chevron S&P 500 nasdaq stock rally selloff outlook",
-]
-
 _finlight_client: httpx.AsyncClient | None = None
 
 
@@ -71,52 +63,57 @@ async def close_finlight_client() -> None:
         _finlight_client = None
 
 
-async def _fetch_single_query(query: str, page_size: int = 100) -> list[dict]:
+COLLECTION_PAGES = 7  # 7페이지 × 100개 = 700개/15분, 월 최대 20,832회 (한도 41%)
+
+
+async def _fetch_us_articles_page(page: int) -> list[dict]:
+    """tickers=["*"] + countries=["US"] 단일 페이지 수집"""
     for attempt in range(4):
         try:
             response = await get_finlight_client().post(
                 "/v2/articles",
                 json={
-                    "query": query,
+                    "tickers": ["*"],
+                    "countries": ["US"],
                     "language": "en",
-                    "pageSize": page_size,
+                    "page": page,
+                    "pageSize": 100,
                     "includeContent": True,
                     "includeEntities": True,
                 }
             )
             if response.status_code == 429:
-                wait = 15 * (attempt + 1)  # 15s → 30s → 45s → 60s
-                logger.warning(f"[Finlight] {query[:20]} 429 → {wait}초 대기 후 재시도 ({attempt + 1}/4)")
+                wait = 15 * (attempt + 1)
+                logger.warning(f"[Finlight] page={page} 429 → {wait}초 대기 후 재시도 ({attempt + 1}/4)")
                 await asyncio.sleep(wait)
                 continue
             response.raise_for_status()
             return response.json().get("articles", [])
         except httpx.HTTPStatusError as e:
-            logger.error(f"[Finlight] {query[:20]} HTTP {e.response.status_code}")
+            logger.error(f"[Finlight] page={page} HTTP {e.response.status_code}")
             return []
         except Exception as e:
-            logger.error(f"[Finlight] {query[:20]} {type(e).__name__}: {e}")
+            logger.error(f"[Finlight] page={page} {type(e).__name__}: {e}")
             return []
-    logger.error(f"[Finlight] {query[:20]} 4회 재시도 후 실패")
+    logger.error(f"[Finlight] page={page} 4회 재시도 후 실패")
     return []
 
 
 async def fetch_news_from_finlight() -> list[dict]:
-    """쿼리 순차 수집 → content 있는 새 기사만 반환"""
-    results = []
-    for q in COLLECTION_QUERIES:
-        result = await _fetch_single_query(q)
-        results.append(result)
-        await asyncio.sleep(3)  # 쿼리 간 3초 간격
+    """미국 주식 뉴스 7페이지(700개) 순차 수집 → content+알려진 ticker 있는 새 기사만 반환"""
+    all_articles_raw = []
+    for page in range(1, COLLECTION_PAGES + 1):
+        articles = await _fetch_us_articles_page(page)
+        all_articles_raw.extend(articles)
+        await asyncio.sleep(2)  # 페이지 간 2초 간격 (429 방지)
 
     seen = set()
     all_articles = []
-    for batch in results:
-        for a in batch:
-            link = a.get("link")
-            if link and link not in seen:
-                seen.add(link)
-                all_articles.append(a)
+    for a in all_articles_raw:
+        link = a.get("link")
+        if link and link not in seen:
+            seen.add(link)
+            all_articles.append(a)
 
     with_tickers = []
     content_count = 0
@@ -124,9 +121,14 @@ async def fetch_news_from_finlight() -> list[dict]:
         if not a.get("content"):
             continue
         content_count += 1
-        if a.get("companies"):
+        companies = a.get("companies") or []
+        known = [
+            c for c in companies
+            if (c.get("ticker") or "").strip().upper() in TICKER_NAMES
+        ]
+        if known:
             with_tickers.append(a)
-    logger.info(f"[Finlight] 수집 {len(all_articles)}개 → content {content_count}개 → ticker 있음 {len(with_tickers)}개")
+    logger.info(f"[Finlight] 수집 {len(all_articles)}개 → content {content_count}개 → 알려진 ticker {len(with_tickers)}개")
 
     links = [a["link"] for a in with_tickers]
     new_links = await asyncio.to_thread(_filter_new_links, links)

@@ -12,7 +12,6 @@ class Settings(BaseSettings):
     genai_user: str
     genai_password: str
 
-    deepl_api_key: str = ""
     admin_api_key: str
 
     class Config:
