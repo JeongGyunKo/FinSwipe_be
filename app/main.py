@@ -22,6 +22,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class _SuppressRootPath(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "GET / HTTP" not in record.getMessage()
+
+logging.getLogger("uvicorn.access").addFilter(_SuppressRootPath())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await analyzer.init_client()
