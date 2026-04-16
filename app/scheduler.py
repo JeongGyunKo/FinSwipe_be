@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.services.news_collector import collect_market_news, cleanup_old_content, reanalyze_unanalyzed
@@ -5,6 +6,11 @@ from app.services.news_collector import collect_market_news, cleanup_old_content
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
+
+
+async def _cleanup_async():
+    """cleanup_old_content는 sync → 이벤트 루프 블로킹 방지를 위해 스레드에서 실행"""
+    await asyncio.to_thread(cleanup_old_content)
 
 
 def start_scheduler():
@@ -25,7 +31,7 @@ def start_scheduler():
         replace_existing=True
     )
     scheduler.add_job(
-        cleanup_old_content,
+        _cleanup_async,
         "interval",
         hours=6,
         id="content_cleanup",

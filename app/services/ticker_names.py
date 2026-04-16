@@ -5559,6 +5559,13 @@ def enrich_tickers(tickers: list[str]) -> list[dict[str, str]]:
     return result
 
 
+# 검색 인덱스: 앱 시작 시 한 번만 lower() 계산
+_SEARCH_TUPLES: list[tuple[str, str, str, str]] = [
+    (ticker, names["corp"].lower(), names["ko"].lower(), ticker.lower())
+    for ticker, names in TICKER_NAMES.items()
+]
+
+
 def search_tickers(query: str) -> list[str]:
     """
     한국어/영문 회사명으로 티커 검색.
@@ -5570,8 +5577,8 @@ def search_tickers(query: str) -> list[str]:
         return []
     return [
         ticker
-        for ticker, names in TICKER_NAMES.items()
-        if q in names["ko"].lower() or q in names["corp"].lower() or q in ticker.lower()
+        for ticker, corp_l, ko_l, ticker_l in _SEARCH_TUPLES
+        if q in ko_l or q in corp_l or q in ticker_l
     ]
 
 

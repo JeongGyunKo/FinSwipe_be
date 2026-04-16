@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import httpx
 from app.core.config import settings
@@ -114,16 +115,13 @@ def _unavailable(reason: str) -> dict:
     }
 
 
-async def analyze_news_batch(articles: list[dict]) -> list[dict]:
-    """기사 제출 → process-next로 큐 소진 → 응답에서 직접 결과 수집"""
-    valid = [
-        a for a in articles
-        if (a.get("link") or a.get("source_url") or "").startswith("http")
-    ]
+_SUBMIT_SEMAPHORE = asyncio.Semaphore(5)
 
-    submitted_map: dict[str, dict] = {}
-    for a in valid:
-        link = (a.get("link") or a.get("source_url") or "").rstrip("/")
+
+async def _submit_one(a: dict) -> tuple[str, dict] | None:
+    """단일 기사 제출 → (link, article) 반환. 실패 시 None."""
+    link = (a.get("link") or a.get("source_url") or "").rstrip("/")
+    async with _SUBMIT_SEMAPHORE:
         ok = await submit_article(
             news_id=link,
             title=a.get("title") or a.get("headline") or "",
@@ -132,8 +130,20 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
             summary_text=(a.get("summary") or "").strip() or None,
             tickers=a.get("tickers") or None,
         )
-        if ok:
-            submitted_map[link] = a
+    return (link, a) if ok else None
+
+
+async def analyze_news_batch(articles: list[dict]) -> list[dict]:
+    """기사 병렬 제출(최대 5개 동시) → process-next로 큐 소진 → 응답에서 직접 결과 수집"""
+    valid = [
+        a for a in articles
+        if (a.get("link") or a.get("source_url") or "").startswith("http")
+    ]
+
+    submit_results = await asyncio.gather(*[_submit_one(a) for a in valid])
+    submitted_map: dict[str, dict] = {
+        link: a for link, a in (r for r in submit_results if r is not None)
+    }
 
     logger.info(f"[GenAI] 제출 완료 {len(submitted_map)}개, 큐 처리 시작...")
 
