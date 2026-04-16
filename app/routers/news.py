@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import secrets
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
@@ -19,7 +20,7 @@ _api_key_header = APIKeyHeader(name="X-Admin-Key", auto_error=False)
 
 
 async def _require_admin(key: str | None = Depends(_api_key_header)) -> None:
-    if not key or key != settings.admin_api_key:
+    if not key or not secrets.compare_digest(key, settings.admin_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
