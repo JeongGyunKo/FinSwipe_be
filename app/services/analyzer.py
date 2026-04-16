@@ -141,7 +141,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
     results: dict[str, dict] = {}
     remaining = set(submitted_map.keys())
 
-    for i in range(10000):
+    for i in range(500):
         try:
             resp = await get_client().post("/api/v1/jobs/process-next")
             data = resp.json()
@@ -194,7 +194,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                 logger.warning(f"[GenAI] 재제출 실패: {link[:60]}")
 
         remaining2 = resubmitted.copy()
-        for i in range(len(resubmitted) * 3 + 10):
+        for i in range(min(len(resubmitted) * 3 + 10, 100)):
             if not remaining2:
                 break
             try:

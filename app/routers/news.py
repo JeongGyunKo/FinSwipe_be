@@ -245,7 +245,12 @@ async def search_news(
 @limiter.limit("30/minute")
 async def get_ticker_list(request: Request):
     """지원하는 전체 티커 목록 반환 (FE 검색 자동완성용)"""
-    return {"count": len(TICKER_LIST), "data": TICKER_LIST}
+    cached = cache_get("ticker_list")
+    if cached is not None:
+        return cached
+    response = {"count": len(TICKER_LIST), "data": TICKER_LIST}
+    cache_set("ticker_list", response, ttl_seconds=3600)  # 1시간 캐시 (데이터 불변)
+    return response
 
 
 @router.get("/genai/health")

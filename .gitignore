@@ -134,6 +134,13 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+
+# Node.js
+node_modules/
+package-lock.json
+
+# Generated files
+*.docx
 # Environments
 .env
 .envrc
