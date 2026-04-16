@@ -1,9 +1,11 @@
 import asyncio
+import hashlib
 import logging
+import re
 import secrets
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from app.core.cache import cache_get, cache_set
 from app.core.config import settings
 from app.core.jobs import create_job, get_job
@@ -24,11 +26,25 @@ async def _require_admin(key: str | None = Depends(_api_key_header)) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+_TICKER_RE = re.compile(r"^[A-Z]{1,5}$")
+
+
 class AnalyzeRequest(BaseModel):
     headline: str = Field(..., min_length=1, max_length=500)
     source_url: str = Field(..., pattern=r"^https?://")
     content: str = Field("", max_length=50000)
     tickers: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("tickers")
+    @classmethod
+    def validate_tickers(cls, v: list[str]) -> list[str]:
+        normalized = []
+        for t in v:
+            upper = t.strip().upper()
+            if not _TICKER_RE.match(upper):
+                raise ValueError(f"Invalid ticker format: {t!r}")
+            normalized.append(upper)
+        return normalized
 
 
 class DiagnoseRequest(BaseModel):
@@ -41,9 +57,10 @@ class DiagnoseRequest(BaseModel):
 @limiter.limit("30/minute")
 async def test_supabase(request: Request):
     result = await asyncio.to_thread(
-        lambda: supabase.table("news_articles").select("*").limit(5).execute()
+        lambda: supabase.table("news_articles").select("id, headline, published_at").limit(5).execute()
     )
-    return {"status": "ok", "count": len(result.data), "data": result.data}
+    data = result.data or []
+    return {"status": "ok", "count": len(data), "data": data}
 
 
 @router.post("/collect", dependencies=[Depends(_require_admin)])
@@ -94,12 +111,12 @@ async def analyze_latest(request: Request, limit: int = Query(default=10, ge=1, 
     """최신 뉴스 일괄 분석 (GenAI)"""
     result = await asyncio.to_thread(
         lambda: supabase.table("news_articles")
-            .select("*")
+            .select("source_url, headline, content, summary, tickers")
             .order("published_at", desc=True)
             .limit(limit)
             .execute()
     )
-    analyzed = await analyze_news_batch(result.data)
+    analyzed = await analyze_news_batch(result.data or [])
     return {"count": len(analyzed), "data": analyzed}
 
 
@@ -118,7 +135,7 @@ async def diagnose_article(request: Request, body: DiagnoseRequest):
 
     data = await asyncio.to_thread(_fetch_article)
     if not data:
-        raise HTTPException(status_code=404, detail=f"DB에서 기사를 찾을 수 없음: {url}")
+        raise HTTPException(status_code=404, detail="기사를 찾을 수 없습니다")
 
     article = data[0]
     title = article.get("headline") or ""
@@ -182,7 +199,7 @@ async def get_latest_news(
             .range(offset, offset + limit - 1)
             .execute()
     )
-    articles = _attach_ticker_names(result.data)
+    articles = _attach_ticker_names(result.data or [])
     response = {"count": len(articles), "offset": offset, "data": articles}
     cache_set(cache_key, response, ttl_seconds=30)
     return response
@@ -200,7 +217,8 @@ async def search_news(
     한국어/영문 회사명 또는 티커로 뉴스 검색.
     예: ?q=애플  ?q=AAPL  ?q=nvidia
     """
-    cache_key = f"search:{q}:{limit}:{offset}"
+    q_hash = hashlib.md5(q.encode()).hexdigest()[:12]
+    cache_key = f"search:{q_hash}:{limit}:{offset}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
@@ -230,7 +248,7 @@ async def search_news(
             .range(offset, offset + limit - 1)
             .execute()
     )
-    articles = _attach_ticker_names(result.data)
+    articles = _attach_ticker_names(result.data or [])
     response = {
         "count": len(articles),
         "offset": offset,

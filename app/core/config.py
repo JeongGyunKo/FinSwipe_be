@@ -14,6 +14,9 @@ class Settings(BaseSettings):
 
     admin_api_key: str
 
+    cors_origins: list[str] = ["*"]
+    log_level: str = "INFO"
+
     class Config:
         env_file = ".env"
 

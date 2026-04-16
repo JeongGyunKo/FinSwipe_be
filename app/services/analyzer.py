@@ -18,7 +18,7 @@ async def init_client() -> None:
     _client = httpx.AsyncClient(
         base_url=settings.genai_url,
         auth=(settings.genai_user, settings.genai_password),
-        timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0),
+        timeout=httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=5.0),
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
     )
 
@@ -186,22 +186,16 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
 
     if remaining:
         logger.warning(f"[GenAI] 큐 소진 후 미처리 {len(remaining)}개 → 재제출 시도...")
+        resubmit_articles = [submitted_map[link] for link in remaining]
+        resubmit_results = await asyncio.gather(*[_submit_one(a) for a in resubmit_articles])
         resubmitted = set()
-        for link in remaining:
-            a = submitted_map[link]
-            ok = await submit_article(
-                news_id=link,
-                title=a.get("title") or a.get("headline") or "",
-                link=link,
-                article_text=(a.get("content") or "").strip() or None,
-                summary_text=(a.get("summary") or "").strip() or None,
-                tickers=a.get("tickers") or None,
-            )
-            if ok:
+        for r in resubmit_results:
+            if r is not None:
+                link, _ = r
                 resubmitted.add(link)
                 logger.info(f"[GenAI] 재제출 성공: {link[:60]}")
             else:
-                logger.warning(f"[GenAI] 재제출 실패: {link[:60]}")
+                logger.warning("[GenAI] 재제출 실패")
 
         remaining2 = resubmitted.copy()
         for i in range(min(len(resubmitted) * 3 + 10, 100)):

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import httpx
+from urllib.parse import urlparse, urlunparse
 from app.core.config import settings
 from app.core.jobs import start_job, finish_job, fail_job
 from app.core.supabase import supabase_admin
@@ -50,7 +51,7 @@ def get_finlight_client() -> httpx.AsyncClient:
         _finlight_client = httpx.AsyncClient(
             base_url=FINLIGHT_BASE_URL,
             headers={"X-API-KEY": settings.finlight_api_key},
-            timeout=20.0,
+            timeout=30.0,
         )
     return _finlight_client
 
@@ -112,13 +113,20 @@ async def fetch_news_from_finlight() -> list[dict]:
         all_articles_raw.extend(articles)
         await asyncio.sleep(2)  # 쿼리 간 2초 간격 (429 방지)
 
+    def _normalize_url(url: str) -> str:
+        parsed = urlparse(url)
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
+
     seen = set()
     all_articles = []
     for a in all_articles_raw:
         link = a.get("link")
-        if link and link not in seen:
-            seen.add(link)
-            all_articles.append(a)
+        if link:
+            normalized = _normalize_url(link)
+            if normalized not in seen:
+                seen.add(normalized)
+                a["link"] = normalized
+                all_articles.append(a)
 
     with_tickers = []
     for a in all_articles:
@@ -144,7 +152,7 @@ def _filter_new_links(links: list[str]) -> set[str]:
     if not links:
         return set()
     existing = set()
-    chunk_size = 50
+    chunk_size = 100
     try:
         for i in range(0, len(links), chunk_size):
             chunk = links[i:i + chunk_size]
@@ -300,10 +308,13 @@ async def collect_market_news() -> dict:
     logger.info(f"저장 완료 → {result['saved']}개 저장, {result['skipped']}개 스킵")
 
     if result["saved"] > 0:
-        task = asyncio.create_task(analyze_and_update(new_articles))
-        task.add_done_callback(
-            lambda t: logger.error(f"[백그라운드] 태스크 오류: {t.exception()}") if t.exception() else None
-        )
+        async def _run_analysis() -> None:
+            try:
+                await analyze_and_update(new_articles)
+            except Exception as e:
+                logger.error(f"[백그라운드] 분석 파이프라인 예외: {type(e).__name__}: {e}", exc_info=True)
+
+        asyncio.create_task(_run_analysis())
         logger.info(f"[백그라운드] GenAI 분석 예약 → {result['saved']}개")
 
     return {**result, "analyzing": result["saved"]}

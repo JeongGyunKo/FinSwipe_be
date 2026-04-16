@@ -3,7 +3,7 @@ from typing import Any
 
 _store: dict[str, tuple[Any, float]] = {}
 _access_count = 0
-_CLEANUP_INTERVAL = 100  # 100번 접근마다 만료 항목 정리
+_CLEANUP_INTERVAL = 20  # 20번 접근마다 만료 항목 정리
 
 
 def _maybe_cleanup() -> None:
