@@ -432,5 +432,5 @@ add_table(
 )
 add_body(doc, "제한 초과 시 429 Too Many Requests 응답을 반환합니다.")
 
-doc.save("c:/dev/news_ai_project/FinSwipe_API_명세서.docx")
+doc.save("c:/dev/FinSwipe_be/FinSwipe_API_명세서.docx")
 print("저장 완료")
