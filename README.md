@@ -1,4 +1,4 @@
-# ai-news-curation-be
+# FinSwipe_be
 
 미국 주식 관련 영문 뉴스 자동 수집 · 감성분석 백엔드
 
