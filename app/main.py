@@ -27,6 +27,7 @@ class _SuppressRootPath(logging.Filter):
         return "GET / HTTP" not in record.getMessage()
 
 logging.getLogger("uvicorn.access").addFilter(_SuppressRootPath())
+logging.getLogger("apscheduler.scheduler").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
