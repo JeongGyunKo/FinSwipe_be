@@ -5,7 +5,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from app.core.cache import cache_get, cache_set
 from app.core.config import settings
-from app.core.jobs import create_job, get_job, start_job, finish_job
+from app.core.jobs import create_job, get_job
 from app.core.limiter import limiter
 from app.core.supabase import supabase_admin as supabase
 from app.services.news_collector import collect_market_news, reanalyze_unanalyzed
