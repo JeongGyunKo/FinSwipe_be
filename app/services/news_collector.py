@@ -63,20 +63,26 @@ async def close_finlight_client() -> None:
         _finlight_client = None
 
 
-COLLECTION_PAGES = 7  # 7페이지 × 100개 = 700개/15분, 월 최대 20,832회 (한도 41%)
+# 7개 쿼리 × 100개 = 700개/15분, 월 최대 20,832회 (한도 41%)
+COLLECTION_QUERIES = [
+    "earnings beat miss EPS revenue guidance outlook forecast",
+    "Apple Microsoft Google Meta Amazon Tesla NVIDIA AMD Intel Qualcomm",
+    "JPMorgan Goldman Sachs Visa Mastercard PayPal Coinbase BlackRock",
+    "merger acquisition IPO buyback dividend upgrade downgrade analyst",
+    "Pfizer Eli Lilly Johnson UnitedHealth Exxon Chevron ConocoPhillips",
+    "semiconductor AI cloud cybersecurity biotech pharma FDA approval",
+    "stock rally selloff S&P500 Nasdaq Russell inflation Fed rate GDP",
+]
 
 
-async def _fetch_us_articles_page(page: int) -> list[dict]:
-    """tickers=["*"] + countries=["US"] 단일 페이지 수집"""
+async def _fetch_single_query(query: str) -> list[dict]:
     for attempt in range(4):
         try:
             response = await get_finlight_client().post(
                 "/v2/articles",
                 json={
-                    "tickers": ["*"],
-                    "countries": ["US"],
+                    "query": query,
                     "language": "en",
-                    "page": page,
                     "pageSize": 100,
                     "includeContent": True,
                     "includeEntities": True,
@@ -84,28 +90,28 @@ async def _fetch_us_articles_page(page: int) -> list[dict]:
             )
             if response.status_code == 429:
                 wait = 15 * (attempt + 1)
-                logger.warning(f"[Finlight] page={page} 429 → {wait}초 대기 후 재시도 ({attempt + 1}/4)")
+                logger.warning(f"[Finlight] 429 → {wait}초 대기 후 재시도 ({attempt + 1}/4)")
                 await asyncio.sleep(wait)
                 continue
             response.raise_for_status()
             return response.json().get("articles", [])
         except httpx.HTTPStatusError as e:
-            logger.error(f"[Finlight] page={page} HTTP {e.response.status_code}")
+            logger.error(f"[Finlight] HTTP {e.response.status_code}: {query[:30]}")
             return []
         except Exception as e:
-            logger.error(f"[Finlight] page={page} {type(e).__name__}: {e}")
+            logger.error(f"[Finlight] {type(e).__name__}: {query[:30]}")
             return []
-    logger.error(f"[Finlight] page={page} 4회 재시도 후 실패")
+    logger.error(f"[Finlight] 4회 재시도 후 실패: {query[:30]}")
     return []
 
 
 async def fetch_news_from_finlight() -> list[dict]:
-    """미국 주식 뉴스 7페이지(700개) 순차 수집 → content+알려진 ticker 있는 새 기사만 반환"""
+    """7개 쿼리 순차 수집 → content+알려진 ticker 있는 새 기사만 반환"""
     all_articles_raw = []
-    for page in range(1, COLLECTION_PAGES + 1):
-        articles = await _fetch_us_articles_page(page)
+    for q in COLLECTION_QUERIES:
+        articles = await _fetch_single_query(q)
         all_articles_raw.extend(articles)
-        await asyncio.sleep(2)  # 페이지 간 2초 간격 (429 방지)
+        await asyncio.sleep(2)  # 쿼리 간 2초 간격 (429 방지)
 
     seen = set()
     all_articles = []
@@ -116,11 +122,9 @@ async def fetch_news_from_finlight() -> list[dict]:
             all_articles.append(a)
 
     with_tickers = []
-    content_count = 0
     for a in all_articles:
-        if not a.get("content"):
+        if not a.get("summary") and not a.get("title"):
             continue
-        content_count += 1
         companies = a.get("companies") or []
         known = [
             c for c in companies
@@ -128,7 +132,7 @@ async def fetch_news_from_finlight() -> list[dict]:
         ]
         if known:
             with_tickers.append(a)
-    logger.info(f"[Finlight] 수집 {len(all_articles)}개 → content {content_count}개 → 알려진 ticker {len(with_tickers)}개")
+    logger.info(f"[Finlight] 수집 {len(all_articles)}개 → 알려진 ticker {len(with_tickers)}개")
 
     links = [a["link"] for a in with_tickers]
     new_links = await asyncio.to_thread(_filter_new_links, links)
