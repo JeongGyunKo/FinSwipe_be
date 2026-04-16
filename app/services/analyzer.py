@@ -153,6 +153,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
     for i in range(500):
         try:
             resp = await get_client().post("/api/v1/jobs/process-next")
+            resp.raise_for_status()
             data = resp.json()
             if not data.get("processed", False):
                 logger.info(f"[GenAI] 큐 소진 (총 {i}개 처리)")
@@ -208,6 +209,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                 break
             try:
                 resp = await get_client().post("/api/v1/jobs/process-next")
+                resp.raise_for_status()
                 data = resp.json()
                 if not data.get("processed", False):
                     logger.info(f"[GenAI] 재처리 큐 소진 (총 {i}개 처리)")

@@ -144,7 +144,7 @@ def _filter_new_links(links: list[str]) -> set[str]:
     if not links:
         return set()
     existing = set()
-    chunk_size = 100
+    chunk_size = 50
     try:
         for i in range(0, len(links), chunk_size):
             chunk = links[i:i + chunk_size]
