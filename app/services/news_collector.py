@@ -79,7 +79,7 @@ COLLECTION_QUERIES = [
 async def _fetch_single_query(query: str) -> list[dict]:
     for attempt in range(4):
         try:
-            from_date = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%d")
+            from_date = (datetime.now(timezone.utc) - timedelta(hours=48)).strftime("%Y-%m-%d")
             response = await get_finlight_client().post(
                 "/v2/articles",
                 json={
