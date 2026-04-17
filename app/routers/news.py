@@ -12,7 +12,7 @@ from app.core.jobs import create_job, get_job
 from app.core.limiter import limiter
 from app.core.supabase import supabase_admin as supabase
 from app.services.news_collector import collect_market_news, reanalyze_unanalyzed
-from app.services.analyzer import analyze_news_batch, check_genai_health, submit_article, get_client, _unavailable
+from app.services.analyzer import analyze_news_batch, check_genai_health, get_client, _unavailable
 from app.services.ticker_names import enrich_tickers, search_tickers, TICKER_NAMES, TICKER_LIST
 
 logger = logging.getLogger(__name__)
@@ -142,31 +142,22 @@ async def diagnose_article(request: Request, body: DiagnoseRequest):
     content = (article.get("content") or "").strip()
     summary = (article.get("summary") or "").strip()
 
-    ok = await submit_article(
-        news_id=url, title=title, link=url,
-        article_text=content or None,
-        summary_text=summary or None,
-    )
-    if not ok:
-        raise HTTPException(status_code=502, detail="GenAI 제출 실패 (HTTP 오류)")
+    payload: dict = {"news_id": url, "title": title, "link": url}
+    if content:
+        payload["article_text"] = content
+    if summary:
+        payload["summary_text"] = summary
 
-    client = get_client()
-    for i in range(30):
-        resp = await client.post("/api/v1/jobs/process-next")
-        data = resp.json()
-        if not data.get("processed", False):
-            raise HTTPException(status_code=504, detail=f"큐 소진 — 기사가 처리되지 않음 (시도 {i}회)")
-        p_id = (data.get("news_id") or "").rstrip("/")
-        if p_id == url:
-            return {
-                "submitted": True,
-                "attempts": i + 1,
-                "raw_response": data,
-                "article_info": {"url": url, "title": title, "content_length": len(content)},
-            }
-        await asyncio.sleep(0.1)
+    resp = await get_client().post("/api/v1/articles/enrich-text", json=payload)
+    if resp.status_code not in (200, 202):
+        raise HTTPException(status_code=502, detail=f"GenAI 제출 실패 (HTTP {resp.status_code})")
 
-    raise HTTPException(status_code=504, detail="30회 시도 후 결과 없음")
+    raw_response = resp.json()
+    return {
+        "submitted": True,
+        "raw_response": raw_response,
+        "article_info": {"url": url, "title": title, "content_length": len(content)},
+    }
 
 
 # ── 공개 엔드포인트 ────────────────────────────────────────────
