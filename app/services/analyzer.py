@@ -138,7 +138,7 @@ def _unavailable(reason: str) -> dict:
     }
 
 
-_SUBMIT_SEMAPHORE = asyncio.Semaphore(5)
+_SUBMIT_SEMAPHORE = asyncio.Semaphore(2)
 
 
 async def analyze_news_batch(articles: list[dict]) -> list[dict]:
