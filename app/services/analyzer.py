@@ -104,6 +104,15 @@ def _parse_direct_response(data: dict) -> dict:
     mixed_flags = data.get("mixed_flags") or {}
     xai = data.get("xai") or None
 
+    localized = data.get("localized") or {}
+    raw_summary_ko = localized.get("summary_3lines") or []
+    summary_3lines_ko = []
+    for s in raw_summary_ko:
+        if isinstance(s, str):
+            summary_3lines_ko.append(s)
+        elif isinstance(s, dict):
+            summary_3lines_ko.append(s.get("text") or s.get("line") or s.get("content") or "")
+
     return {
         "status": data.get("status"),
         "outcome": data.get("outcome"),
@@ -112,6 +121,9 @@ def _parse_direct_response(data: dict) -> dict:
         "is_mixed": mixed_flags.get("is_mixed"),
         "xai": xai,
         "error": data.get("error"),
+        "headline_ko": localized.get("title") or None,
+        "summary_3lines_ko": summary_3lines_ko or None,
+        "xai_ko": localized.get("xai") or None,
     }
 
 

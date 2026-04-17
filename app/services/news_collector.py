@@ -295,6 +295,9 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                     "sentiment_score": sentiment.get("score"),
                     "summary_3lines": enrichment.get("summary_3lines") or [],
                     "xai": enrichment.get("xai"),
+                    "headline_ko": enrichment.get("headline_ko"),
+                    "summary_3lines_ko": enrichment.get("summary_3lines_ko"),
+                    "xai_ko": enrichment.get("xai_ko"),
                 }
                 logger.info(
                     f"[DB] 저장 시도: {link[:60]} | "
