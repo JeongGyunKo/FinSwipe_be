@@ -27,7 +27,7 @@ def start_scheduler():
     scheduler.add_job(
         reanalyze_unanalyzed,
         "interval",
-        minutes=30,
+        minutes=2,
         id="reanalyze_unanalyzed",
         replace_existing=True,
         max_instances=1,

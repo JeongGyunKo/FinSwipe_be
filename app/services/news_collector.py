@@ -367,7 +367,7 @@ def _fetch_unanalyzed(limit: int) -> list[dict]:
     return result.data
 
 
-async def reanalyze_unanalyzed(limit: int = 50, job_id: str | None = None) -> None:
+async def reanalyze_unanalyzed(limit: int = 10, job_id: str | None = None) -> None:
     """sentiment가 NULL인 기사 재분석 (스케줄러용)"""
     try:
         if job_id:
