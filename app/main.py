@@ -63,8 +63,17 @@ async def security_headers(request: Request, call_next) -> Response:
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
-    response.headers["Content-Security-Policy"] = "default-src 'none'"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    if request.url.path in ("/docs", "/openapi.json", "/redoc"):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; "
+            "script-src 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "img-src 'self' data: https://fastapi.tiangolo.com; "
+            "connect-src 'self'"
+        )
+    else:
+        response.headers["Content-Security-Policy"] = "default-src 'none'"
     return response
 
 
