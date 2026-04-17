@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import httpx
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, urlunparse
 from app.core.config import settings
 from app.core.jobs import start_job, finish_job, fail_job
@@ -78,6 +79,7 @@ COLLECTION_QUERIES = [
 async def _fetch_single_query(query: str) -> list[dict]:
     for attempt in range(4):
         try:
+            published_after = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
             response = await get_finlight_client().post(
                 "/v2/articles",
                 json={
@@ -86,6 +88,7 @@ async def _fetch_single_query(query: str) -> list[dict]:
                     "pageSize": 100,
                     "includeContent": True,
                     "includeEntities": True,
+                    "publishedAfter": published_after,
                 }
             )
             if response.status_code == 429:
