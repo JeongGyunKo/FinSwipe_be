@@ -271,11 +271,21 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                 continue
 
             if not isinstance(sentiment, dict):
+                outcome = enrichment.get("outcome") or ""
                 logger.warning(
                     f"[백그라운드] 스킵 (sentiment 없음): {link[:60]} | "
-                    f"status={enrichment.get('status')} outcome={enrichment.get('outcome')} "
+                    f"status={enrichment.get('status')} outcome={outcome} "
                     f"error={enrichment.get('error')}"
                 )
+                if outcome and outcome != "fatal_failure":
+                    try:
+                        await asyncio.to_thread(
+                            _db_update_article,
+                            {"sentiment_label": f"_{outcome}"},
+                            link,
+                        )
+                    except Exception as e:
+                        logger.error(f"[백그라운드] 루프 차단 표시 실패 ({link[:50]}): {e}")
                 skipped += 1
                 continue
 
