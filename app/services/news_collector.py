@@ -138,6 +138,11 @@ async def fetch_news_from_finlight() -> list[dict]:
                 a["link"] = normalized
                 all_articles.append(a)
 
+    logger.info(f"[Finlight] 원본 {len(all_articles_raw)}개 → URL 중복제거 {len(all_articles)}개")
+
+    no_entities = sum(1 for a in all_articles if not (a.get("companies") or []))
+    logger.info(f"[Finlight] companies 없는 기사: {no_entities}개 / {len(all_articles)}개")
+
     with_tickers = []
     for a in all_articles:
         if not a.get("summary") and not a.get("title"):
@@ -149,7 +154,7 @@ async def fetch_news_from_finlight() -> list[dict]:
         ]
         if known:
             with_tickers.append(a)
-    logger.info(f"[Finlight] 수집 {len(all_articles)}개 → 알려진 ticker {len(with_tickers)}개")
+    logger.info(f"[Finlight] ticker 필터 통과: {len(with_tickers)}개 / {len(all_articles)}개")
 
     links = [a["link"] for a in with_tickers]
     new_links = await asyncio.to_thread(_filter_new_links, links)
