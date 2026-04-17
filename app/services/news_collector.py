@@ -79,7 +79,7 @@ COLLECTION_QUERIES = [
 async def _fetch_single_query(query: str) -> list[dict]:
     for attempt in range(4):
         try:
-            published_after = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            from_date = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%d")
             response = await get_finlight_client().post(
                 "/v2/articles",
                 json={
@@ -88,7 +88,7 @@ async def _fetch_single_query(query: str) -> list[dict]:
                     "pageSize": 100,
                     "includeContent": True,
                     "includeEntities": True,
-                    "publishedAfter": published_after,
+                    "from": from_date,
                 }
             )
             if response.status_code == 429:
