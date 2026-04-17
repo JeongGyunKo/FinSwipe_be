@@ -76,28 +76,32 @@ COLLECTION_QUERIES = [
 ]
 
 
-async def _fetch_single_query(query: str) -> list[dict]:
+async def _fetch_single_query(query: str, from_date: str | None = None) -> list[dict]:
+    payload: dict = {
+        "query": query,
+        "language": "en",
+        "pageSize": 100,
+        "includeContent": True,
+        "includeEntities": True,
+        "excludeEmptyContent": True,
+        "orderBy": "publishDate",
+        "order": "DESC",
+    }
+    if from_date:
+        payload["from"] = from_date
+
     for attempt in range(4):
         try:
-            response = await get_finlight_client().post(
-                "/v2/articles",
-                json={
-                    "query": query,
-                    "language": "en",
-                    "pageSize": 100,
-                    "includeContent": True,
-                    "includeEntities": True,
-                    "sortBy": "publishDate",
-                    "order": "DESC",
-                }
-            )
+            response = await get_finlight_client().post("/v2/articles", json=payload)
             if response.status_code == 429:
                 wait = 15 * (attempt + 1)
                 logger.warning(f"[Finlight] 429 → {wait}초 대기 후 재시도 ({attempt + 1}/4)")
                 await asyncio.sleep(wait)
                 continue
             response.raise_for_status()
-            return response.json().get("articles", [])
+            articles = response.json().get("articles", [])
+            logger.info(f"[Finlight] '{query[:40]}' → {len(articles)}개")
+            return articles
         except httpx.HTTPStatusError as e:
             logger.error(f"[Finlight] HTTP {e.response.status_code}: {query[:30]}")
             return []
@@ -110,9 +114,11 @@ async def _fetch_single_query(query: str) -> list[dict]:
 
 async def fetch_news_from_finlight() -> list[dict]:
     """7개 쿼리 순차 수집 → content+알려진 ticker 있는 새 기사만 반환"""
+    from_date = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%d")
+
     all_articles_raw = []
     for q in COLLECTION_QUERIES:
-        articles = await _fetch_single_query(q)
+        articles = await _fetch_single_query(q, from_date=from_date)
         all_articles_raw.extend(articles)
         await asyncio.sleep(2)  # 쿼리 간 2초 간격 (429 방지)
 
