@@ -296,8 +296,17 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                     "summary_3lines": enrichment.get("summary_3lines") or [],
                     "xai": enrichment.get("xai"),
                 }
+                logger.info(
+                    f"[DB] 저장 시도: {link[:60]} | "
+                    f"label={sentiment.get('label')} score={sentiment.get('score')} "
+                    f"summary_lines={len(update_data['summary_3lines'])} "
+                    f"xai={'있음' if update_data['xai'] else '없음'}"
+                )
                 rows = await asyncio.to_thread(_db_update_article, update_data, link)
-                logger.info(f"[DB] 업데이트: {link[:60]} → label={sentiment.get('label')} rows={rows}")
+                if rows == 0:
+                    logger.warning(f"[DB] 업데이트 0행 — source_url 불일치 가능성: {link[:80]}")
+                else:
+                    logger.info(f"[DB] 저장 완료: {link[:60]} rows={rows}")
                 updated += 1
             except Exception as e:
                 failed += 1

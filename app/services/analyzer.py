@@ -82,6 +82,16 @@ def _parse_storage_payload(enrichment: dict) -> dict:
             "confidence": sentiment_raw.get("confidence"),
         }
 
+    logger.debug(
+        f"[파싱] sentiment_raw={sentiment_raw} → parsed={sentiment} | "
+        f"analysis_status={enrichment.get('analysis_status')} "
+        f"analysis_outcome={enrichment.get('analysis_outcome')} | "
+        f"summary_3lines_count={len(enrichment.get('summary_3lines') or [])} "
+        f"xai={'있음' if enrichment.get('xai') else '없음'} "
+        f"stage_statuses={enrichment.get('stage_statuses')} "
+        f"errors={enrichment.get('errors')}"
+    )
+
     raw_summary = enrichment.get("summary_3lines") or []
     summary_3lines = []
     for s in raw_summary:
@@ -169,13 +179,22 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
             if p_id in remaining:
                 remaining.discard(p_id)
                 if enrichment and p_outcome in ("success", "partial_success"):
-                    results[p_id] = _parse_storage_payload(enrichment)
-                    logger.info(f"[GenAI] 결과 수집: {p_id[:60]} outcome={p_outcome}")
+                    parsed = _parse_storage_payload(enrichment)
+                    results[p_id] = parsed
+                    logger.info(
+                        f"[GenAI] 결과 수집: {p_id[:60]} outcome={p_outcome} | "
+                        f"sentiment={parsed.get('sentiment')} "
+                        f"summary_lines={len(parsed.get('summary_3lines') or [])} "
+                        f"xai={'있음' if parsed.get('xai') else '없음'}"
+                    )
                 else:
                     results[p_id] = _unavailable(f"처리 실패: {p_outcome}")
-                    logger.warning(f"[GenAI] 실패: {p_id[:60]} outcome={p_outcome}")
-                    if enrichment:
-                        logger.debug(f"  ↳ stage_statuses={enrichment.get('stage_statuses')} errors={enrichment.get('errors')}")
+                    logger.warning(
+                        f"[GenAI] 실패: {p_id[:60]} outcome={p_outcome} | "
+                        f"enrichment={'있음' if enrichment else '없음'} "
+                        f"stage_statuses={enrichment.get('stage_statuses') if enrichment else None} "
+                        f"errors={enrichment.get('errors') if enrichment else None}"
+                    )
 
                 if not remaining:
                     logger.info(f"[GenAI] 목표 기사 전부 완료 (총 {i+1}개 처리)")
