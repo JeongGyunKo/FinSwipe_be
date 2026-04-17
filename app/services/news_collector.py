@@ -66,17 +66,17 @@ async def close_finlight_client() -> None:
 
 # 7개 쿼리 × 100개 = 700개/15분, 월 최대 20,832회 (한도 41%)
 COLLECTION_QUERIES = [
-    "earnings beat miss EPS revenue guidance outlook forecast",
-    "Apple Microsoft Google Meta Amazon Tesla NVIDIA AMD Intel Qualcomm",
-    "JPMorgan Goldman Sachs Visa Mastercard PayPal Coinbase BlackRock",
-    "merger acquisition IPO buyback dividend upgrade downgrade analyst",
-    "Pfizer Eli Lilly Johnson UnitedHealth Exxon Chevron ConocoPhillips",
-    "semiconductor AI cloud cybersecurity biotech pharma FDA approval",
-    "stock rally selloff S&P500 Nasdaq Russell inflation Fed rate GDP",
+    "stock earnings",
+    "stock market shares",
+    "analyst rating stocks",
+    "merger acquisition dividend",
+    "Federal Reserve inflation rate",
+    "semiconductor technology stocks",
+    "energy oil bank stocks",
 ]
 
 
-async def _fetch_single_query(query: str, from_date: str | None = None) -> list[dict]:
+async def _fetch_single_query(query: str) -> list[dict]:
     payload: dict = {
         "query": query,
         "language": "en",
@@ -87,8 +87,6 @@ async def _fetch_single_query(query: str, from_date: str | None = None) -> list[
         "orderBy": "publishDate",
         "order": "DESC",
     }
-    if from_date:
-        payload["from"] = from_date
 
     for attempt in range(4):
         try:
@@ -100,7 +98,12 @@ async def _fetch_single_query(query: str, from_date: str | None = None) -> list[
                 continue
             response.raise_for_status()
             articles = response.json().get("articles", [])
-            logger.info(f"[Finlight] '{query[:40]}' → {len(articles)}개")
+            if articles:
+                newest = articles[0].get("publishDate", "")[:10]
+                oldest = articles[-1].get("publishDate", "")[:10]
+                logger.info(f"[Finlight] '{query[:40]}' → {len(articles)}개 (최신: {newest}, 최구: {oldest})")
+            else:
+                logger.info(f"[Finlight] '{query[:40]}' → 0개")
             return articles
         except httpx.HTTPStatusError as e:
             logger.error(f"[Finlight] HTTP {e.response.status_code}: {query[:30]}")
@@ -114,11 +117,9 @@ async def _fetch_single_query(query: str, from_date: str | None = None) -> list[
 
 async def fetch_news_from_finlight() -> list[dict]:
     """7개 쿼리 순차 수집 → content+알려진 ticker 있는 새 기사만 반환"""
-    from_date = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%d")
-
     all_articles_raw = []
     for q in COLLECTION_QUERIES:
-        articles = await _fetch_single_query(q, from_date=from_date)
+        articles = await _fetch_single_query(q)
         all_articles_raw.extend(articles)
         await asyncio.sleep(2)  # 쿼리 간 2초 간격 (429 방지)
 
