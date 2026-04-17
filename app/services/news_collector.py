@@ -277,11 +277,11 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                     f"status={enrichment.get('status')} outcome={outcome} "
                     f"error={enrichment.get('error')}"
                 )
-                if outcome and outcome != "fatal_failure":
+                if outcome == "clean_filtered":
                     try:
                         await asyncio.to_thread(
                             _db_update_article,
-                            {"sentiment_label": f"_{outcome}"},
+                            {"sentiment_label": "_clean_filtered"},
                             link,
                         )
                     except Exception as e:
