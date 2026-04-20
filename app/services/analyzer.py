@@ -152,18 +152,18 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
         link = (a.get("link") or a.get("source_url") or "").rstrip("/")
         async with _SUBMIT_SEMAPHORE:
             try:
+                article_text = (a.get("content") or "").strip() or None
+                if not article_text:
+                    logger.warning(f"[GenAI] 원문 없음 → 스킵: {link[:60]}")
+                    return (link, _unavailable("원문 없음"))
+
+                tickers = a.get("tickers") or None
                 payload: dict = {
                     "news_id": link,
                     "title": a.get("title") or a.get("headline") or "",
                     "link": link,
+                    "article_text": article_text,
                 }
-                article_text = (a.get("content") or "").strip() or None
-                summary_text = (a.get("summary") or "").strip() or None
-                tickers = a.get("tickers") or None
-                if article_text:
-                    payload["article_text"] = article_text
-                if summary_text:
-                    payload["summary_text"] = summary_text
                 if tickers:
                     payload["ticker"] = tickers
 

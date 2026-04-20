@@ -193,6 +193,9 @@ def save_news_to_db(articles: list[dict]) -> dict:
         if not article.get("link") or not article.get("title"):
             skipped += 1
             continue
+        if not (article.get("content") or "").strip():
+            skipped += 1
+            continue
 
         images = article.get("images") or []
         summary = (article.get("summary") or "").strip()
@@ -359,8 +362,9 @@ async def collect_market_news() -> dict:
 
 def _fetch_unanalyzed(limit: int) -> list[dict]:
     result = supabase_admin.table("news_articles")\
-        .select("id, source_url, headline, content, summary, tickers")\
+        .select("id, source_url, headline, content, tickers")\
         .is_("sentiment_label", "null")\
+        .not_.is_("content", "null")\
         .order("published_at", desc=True)\
         .limit(limit)\
         .execute()
