@@ -191,7 +191,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                 return (link, parsed)
 
             except Exception as e:
-                logger.error(f"[GenAI] enrich-text 오류: {link[:60]} | {e}")
+                logger.error(f"[GenAI] enrich-text 오류: {link[:60]} | {type(e).__name__}: {e!r}")
                 return (link, _unavailable(str(e)))
 
     logger.info(f"[GenAI] enrichment 시작 → {len(valid)}개 (최대 5개 동시)")
