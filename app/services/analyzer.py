@@ -138,7 +138,7 @@ def _unavailable(reason: str) -> dict:
     }
 
 
-_SUBMIT_SEMAPHORE = asyncio.Semaphore(2)
+_SUBMIT_SEMAPHORE = asyncio.Semaphore(1)
 
 
 async def analyze_news_batch(articles: list[dict]) -> list[dict]:
@@ -151,6 +151,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
     async def _enrich_one(a: dict) -> tuple[str, dict]:
         link = (a.get("link") or a.get("source_url") or "").rstrip("/")
         async with _SUBMIT_SEMAPHORE:
+            await asyncio.sleep(3)
             try:
                 article_text = (a.get("content") or "").strip() or None
                 if not article_text:
