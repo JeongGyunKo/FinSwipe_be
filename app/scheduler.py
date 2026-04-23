@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from app.services.news_collector import collect_market_news, cleanup_old_content, reanalyze_unanalyzed
+from app.services.news_collector import collect_market_news, cleanup_old_content
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +25,6 @@ def start_scheduler():
         max_instances=1,
     )
     scheduler.add_job(
-        reanalyze_unanalyzed,
-        "interval",
-        minutes=2,
-        id="reanalyze_unanalyzed",
-        replace_existing=True,
-        max_instances=1,
-    )
-    scheduler.add_job(
         _cleanup_async,
         "interval",
         hours=6,
@@ -41,4 +33,4 @@ def start_scheduler():
         max_instances=1,
     )
     scheduler.start()
-    logger.info("스케줄러 시작 → 15분마다 뉴스 수집, 30분마다 미분석 재분석, 6시간마다 원문 정리")
+    logger.info("스케줄러 시작 → 15분마다 뉴스 수집, 6시간마다 원문 정리")

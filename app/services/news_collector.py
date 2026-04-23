@@ -335,10 +335,34 @@ def cleanup_old_content() -> None:
         logger.error(f"[정리] 삭제 실패: {e}")
 
 
+DAILY_ARTICLE_LIMIT = 10
+
+
+def _count_today_saved() -> int:
+    from datetime import datetime, timezone
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    try:
+        result = supabase_admin.table("news_articles")\
+            .select("id", count="exact")\
+            .gte("created_at", today_start)\
+            .execute()
+        return result.count or 0
+    except Exception as e:
+        logger.error(f"오늘 기사 수 조회 실패: {e}")
+        return 0
+
+
 async def collect_market_news() -> dict:
     """뉴스 수집 파이프라인 - 수집/저장 즉시 반환, 분석은 백그라운드"""
-    logger.info("뉴스 수집 시작...")
+    today_count = await asyncio.to_thread(_count_today_saved)
+    remaining = DAILY_ARTICLE_LIMIT - today_count
+    if remaining <= 0:
+        logger.info(f"[수집] 오늘 한도 {DAILY_ARTICLE_LIMIT}개 도달 → 수집 스킵")
+        return {"saved": 0, "skipped": 0, "analyzing": 0}
+
+    logger.info(f"뉴스 수집 시작... (오늘 {today_count}개 저장됨, {remaining}개 남음)")
     new_articles = await fetch_news_from_finlight()
+    new_articles = new_articles[:remaining]
 
     if not new_articles:
         logger.info("새 기사 없음 - 수집 종료")
