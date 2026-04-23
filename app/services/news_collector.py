@@ -335,7 +335,7 @@ def cleanup_old_content() -> None:
         logger.error(f"[정리] 삭제 실패: {e}")
 
 
-DAILY_ARTICLE_LIMIT = 10
+DAILY_ARTICLE_LIMIT = 30
 
 
 def _count_today_saved() -> int:
