@@ -143,9 +143,16 @@ async def fetch_news_from_finlight() -> list[dict]:
     no_entities = sum(1 for a in all_articles if not (a.get("companies") or []))
     logger.info(f"[Finlight] companies 없는 기사: {no_entities}개 / {len(all_articles)}개")
 
+    _TRANSCRIPT_KEYWORDS = ("transcript", "conference call")
+
     with_tickers = []
+    skipped_transcript = 0
     for a in all_articles:
         if not a.get("summary") and not a.get("title"):
+            continue
+        title_lower = (a.get("title") or "").lower()
+        if any(kw in title_lower for kw in _TRANSCRIPT_KEYWORDS):
+            skipped_transcript += 1
             continue
         companies = a.get("companies") or []
         known = [
@@ -154,6 +161,7 @@ async def fetch_news_from_finlight() -> list[dict]:
         ]
         if known:
             with_tickers.append(a)
+    logger.info(f"[Finlight] transcript 필터 제외: {skipped_transcript}개")
     logger.info(f"[Finlight] ticker 필터 통과: {len(with_tickers)}개 / {len(all_articles)}개")
 
     links = [a["link"] for a in with_tickers]
@@ -245,6 +253,16 @@ async def analyze_and_update(articles: list[dict]) -> None:
         await _do_analyze_and_update(articles)
 
 
+def _normalize_sentiment(label: str | None) -> str:
+    if label in ("positive", "bullish"):
+        return "positive"
+    if label in ("negative", "bearish"):
+        return "negative"
+    if label == "mixed":
+        return "mixed"
+    return "neutral"
+
+
 def _db_update_article(update_data: dict, link: str) -> int:
     res = supabase_admin.table("news_articles").update(update_data).eq("source_url", link).execute()
     rows = len(res.data) if res.data else 0
@@ -294,7 +312,7 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
 
             try:
                 update_data = {
-                    "sentiment_label": sentiment.get("label"),
+                    "sentiment_label": _normalize_sentiment(sentiment.get("label")),
                     "sentiment_score": sentiment.get("score"),
                     "summary_3lines": enrichment.get("summary_3lines") or [],
                     "xai": enrichment.get("xai"),
@@ -375,6 +393,12 @@ async def collect_market_news() -> dict:
         async def _run_analysis() -> None:
             try:
                 await analyze_and_update(new_articles)
+                # 분석 완료 후 푸시 알림 발송
+                from app.services.notification import notify_new_articles
+                from app.core.config import settings as _settings
+                fcm_key = getattr(_settings, "fcm_server_key", None)
+                if fcm_key:
+                    await notify_new_articles(result["saved"], fcm_key)
             except Exception as e:
                 logger.error(f"[백그라운드] 분석 파이프라인 예외: {type(e).__name__}: {e}", exc_info=True)
 
