@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["*"]
     log_level: str = "INFO"
+    fcm_server_key: str = ""  # Firebase Cloud Messaging 서버 키 (레거시, 미사용)
+    fcm_service_account_json: str = ""  # Firebase 서비스 계정 JSON 전체 내용
 
     class Config:
         env_file = ".env"

@@ -331,6 +331,22 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                     logger.warning(f"[DB] 업데이트 0행 — source_url 불일치 가능성: {link[:80]}")
                 else:
                     logger.info(f"[DB] 저장 완료: {link[:60]} rows={rows}")
+                    # 관심 종목 알림 발송
+                    tickers = article.get("tickers") or []
+                    headline = article.get("headline") or article.get("title") or ""
+                    if tickers and headline:
+                        try:
+                            from app.services.notification import notify_ticker_article
+                            from app.core.config import settings as _settings
+                            fcm_json = getattr(_settings, "fcm_service_account_json", None)
+                            if fcm_json:
+                                asyncio.create_task(notify_ticker_article(
+                                    headline=headline,
+                                    tickers=tickers,
+                                    service_account_json=fcm_json,
+                                ))
+                        except Exception as e:
+                            logger.error(f"[알림] 발송 실패 ({link[:50]}): {e}")
                 updated += 1
             except Exception as e:
                 failed += 1
