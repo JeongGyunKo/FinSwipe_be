@@ -29,6 +29,48 @@ async def _require_admin(key: str | None = Depends(_api_key_header)) -> None:
 _TICKER_RE = re.compile(r"^[A-Z]{1,5}$")
 
 
+class DeviceTokenRequest(BaseModel):
+    token: str = Field(..., min_length=10, max_length=500)
+    platform: str = Field("web", pattern=r"^(web|ios|android)$")
+
+
+class DeviceTokenDeleteRequest(BaseModel):
+    token: str = Field(..., min_length=10, max_length=500)
+
+
+@router.post("/device-token")
+async def register_device_token(
+    body: DeviceTokenRequest,
+    request: Request,
+    user_id: str = Query(...),
+):
+    """디바이스 푸시 알림 토큰 등록"""
+    try:
+        supabase.table("device_tokens").upsert(
+            {"user_id": user_id, "token": body.token, "platform": body.platform},
+            on_conflict="user_id,token",
+        ).execute()
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"[알림] 토큰 등록 실패: {e}")
+        raise HTTPException(status_code=500, detail="토큰 등록 실패")
+
+
+@router.delete("/device-token")
+async def delete_device_token(body: DeviceTokenDeleteRequest, user_id: str = Query(...)):
+    """디바이스 푸시 알림 토큰 삭제"""
+    try:
+        supabase.table("device_tokens")\
+            .delete()\
+            .eq("user_id", user_id)\
+            .eq("token", body.token)\
+            .execute()
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"[알림] 토큰 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="토큰 삭제 실패")
+
+
 class AnalyzeRequest(BaseModel):
     headline: str = Field(..., min_length=1, max_length=500)
     source_url: str = Field(..., pattern=r"^https?://")

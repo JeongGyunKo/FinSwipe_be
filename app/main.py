@@ -8,7 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.supabase import supabase_admin
-from app.routers import news
+from app.routers import news, auth
 from app.scheduler import scheduler, start_scheduler
 from app.services import analyzer
 from app.services.news_collector import close_finlight_client
@@ -78,6 +78,7 @@ async def security_headers(request: Request, call_next) -> Response:
 
 
 app.include_router(news.router, prefix="/news", tags=["news"])
+app.include_router(auth.router, prefix="/auth", tags=["auth"])
 
 
 @app.get("/health")
