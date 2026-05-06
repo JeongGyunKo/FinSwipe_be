@@ -427,8 +427,9 @@ async def collect_market_news() -> dict:
 def _fetch_unanalyzed(limit: int) -> list[dict]:
     result = supabase_admin.table("news_articles")\
         .select("id, source_url, headline, content, tickers")\
-        .is_("sentiment_label", "null")\
+        .or_("sentiment_label.is.null,summary_3lines_ko.is.null")\
         .not_.is_("content", "null")\
+        .neq("sentiment_label", "_clean_filtered")\
         .order("published_at", desc=True)\
         .limit(limit)\
         .execute()
