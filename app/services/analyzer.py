@@ -170,7 +170,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                 tickers = a.get("tickers") or None
                 summary_text = (a.get("summary") or "").strip() or None
                 payload: dict = {
-                    "news_id": f"{link}?v=2",
+                    "news_id": f"{link}?v=3",
                     "title": a.get("title") or a.get("headline") or "",
                     "link": link,
                     "article_text": article_text,
