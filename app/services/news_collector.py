@@ -324,7 +324,9 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                     f"[DB] 저장 시도: {link[:60]} | "
                     f"label={sentiment.get('label')} score={sentiment.get('score')} "
                     f"summary_lines={len(update_data['summary_3lines'])} "
-                    f"xai={'있음' if update_data['xai'] else '없음'}"
+                    f"xai={'있음' if update_data['xai'] else '없음'} "
+                    f"headline_ko={'있음' if update_data['headline_ko'] else '없음'} "
+                    f"summary_ko_lines={len(update_data['summary_3lines_ko'] or [])}"
                 )
                 rows = await asyncio.to_thread(_db_update_article, update_data, link)
                 if rows == 0:
