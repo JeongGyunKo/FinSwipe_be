@@ -105,6 +105,12 @@ def _parse_direct_response(data: dict) -> dict:
     xai = data.get("xai") or None
 
     localized = data.get("localized") or {}
+    logger.info(
+        f"[파싱] localized 필드: title={'있음' if localized.get('title') else '없음'} "
+        f"summary_3lines_count={len(localized.get('summary_3lines') or [])} "
+        f"xai={'있음' if localized.get('xai') else '없음'} "
+        f"localized_keys={list(localized.keys())}"
+    )
     raw_summary_ko = localized.get("summary_3lines") or []
     summary_3lines_ko = []
     for s in raw_summary_ko:
