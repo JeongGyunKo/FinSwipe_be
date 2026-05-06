@@ -170,10 +170,11 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
 
                 tickers = a.get("tickers") or None
                 summary_text = (a.get("summary") or "").strip() or None
+                cache_buster = f"?d={date.today().isoformat()}"
                 payload: dict = {
-                    "news_id": f"{link}?d={date.today().isoformat()}",
+                    "news_id": f"{link}{cache_buster}",
                     "title": a.get("title") or a.get("headline") or "",
-                    "link": link,
+                    "link": f"{link}{cache_buster}",
                     "article_text": article_text,
                 }
                 if summary_text:
