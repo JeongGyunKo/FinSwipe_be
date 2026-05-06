@@ -165,12 +165,15 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                     return (link, _unavailable("원문 없음"))
 
                 tickers = a.get("tickers") or None
+                summary_text = (a.get("summary") or "").strip() or None
                 payload: dict = {
                     "news_id": link,
                     "title": a.get("title") or a.get("headline") or "",
                     "link": link,
                     "article_text": article_text,
                 }
+                if summary_text:
+                    payload["summary_text"] = summary_text
                 if tickers:
                     payload["ticker"] = tickers
 
