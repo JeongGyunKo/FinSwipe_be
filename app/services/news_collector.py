@@ -316,7 +316,7 @@ async def _do_analyze_and_update(articles: list[dict]) -> None:
                     "sentiment_score": sentiment.get("score"),
                     "summary_3lines": enrichment.get("summary_3lines") or [],
                     "xai": enrichment.get("xai"),
-                    "headline_ko": enrichment.get("headline_ko"),
+                    "headline_ko": enrichment.get("headline_ko") or article.get("headline"),
                     "summary_3lines_ko": enrichment.get("summary_3lines_ko"),
                     "xai_ko": enrichment.get("xai_ko"),
                 }
@@ -429,7 +429,7 @@ async def collect_market_news() -> dict:
 def _fetch_unanalyzed(limit: int) -> list[dict]:
     result = supabase_admin.table("news_articles")\
         .select("id, source_url, headline, summary, content, tickers")\
-        .or_("sentiment_label.is.null,summary_3lines_ko.is.null,headline_ko.is.null")\
+        .or_("sentiment_label.is.null,summary_3lines_ko.is.null")\
         .not_.is_("content", "null")\
         .or_("sentiment_label.is.null,sentiment_label.neq._clean_filtered")\
         .order("published_at", desc=True)\
