@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import date
 import httpx
 from app.core.config import settings
 
@@ -170,7 +171,7 @@ async def analyze_news_batch(articles: list[dict]) -> list[dict]:
                 tickers = a.get("tickers") or None
                 summary_text = (a.get("summary") or "").strip() or None
                 payload: dict = {
-                    "news_id": f"{link}?v=3",
+                    "news_id": f"{link}?d={date.today().isoformat()}",
                     "title": a.get("title") or a.get("headline") or "",
                     "link": link,
                     "article_text": article_text,
