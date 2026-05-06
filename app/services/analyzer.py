@@ -119,6 +119,9 @@ def _parse_direct_response(data: dict) -> dict:
         elif isinstance(s, dict):
             summary_3lines_ko.append(s.get("text") or s.get("line") or s.get("content") or "")
 
+    # GenAI 서버가 localized 필드 없이 summary_3lines에 한국어를 직접 반환하는 경우 fallback
+    resolved_summary_ko = summary_3lines_ko or summary_3lines or None
+
     return {
         "status": data.get("status"),
         "outcome": data.get("outcome"),
@@ -128,7 +131,7 @@ def _parse_direct_response(data: dict) -> dict:
         "xai": xai,
         "error": data.get("error"),
         "headline_ko": localized.get("title") or None,
-        "summary_3lines_ko": summary_3lines_ko or None,
+        "summary_3lines_ko": resolved_summary_ko,
         "xai_ko": localized.get("xai") or None,
     }
 
