@@ -133,7 +133,7 @@ def _parse_direct_response(data: dict) -> dict:
         "error": data.get("error"),
         "headline_ko": localized.get("title") or None,
         "summary_3lines_ko": resolved_summary_ko,
-        "xai_ko": localized.get("xai") or xai or None,
+        "xai_ko": localized.get("xai") or None,
     }
 
 
