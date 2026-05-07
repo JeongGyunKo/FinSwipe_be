@@ -29,8 +29,8 @@ async def _get_access_token(service_account_json: str) -> str | None:
         return None
 
 
-def _get_tokens_for_tickers(tickers: list[str]) -> list[str]:
-    """관심 종목을 등록한 사용자들의 FCM 토큰 조회"""
+def _get_tokens_for_tickers(tickers: list[str], notify_type: str = "all_news") -> list[str]:
+    """관심 종목을 등록한 사용자들의 FCM 토큰 조회 (알림 설정 필터 적용)"""
     if not tickers:
         return []
     try:
@@ -43,9 +43,11 @@ def _get_tokens_for_tickers(tickers: list[str]) -> list[str]:
         if not user_ids:
             return []
 
+        notify_col = "notify_sentiment_news" if notify_type == "sentiment_news" else "notify_all_news"
         tokens_result = supabase_admin.table("device_tokens") \
             .select("token") \
             .in_("user_id", user_ids) \
+            .eq(notify_col, True) \
             .execute()
 
         return [row["token"] for row in tokens_result.data or []]
