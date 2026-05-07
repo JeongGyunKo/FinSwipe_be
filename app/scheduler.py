@@ -35,10 +35,10 @@ def start_scheduler():
     scheduler.add_job(
         reanalyze_unanalyzed,
         "interval",
-        hours=1,
+        minutes=15,
         id="reanalyzer",
         replace_existing=True,
         max_instances=1,
     )
     scheduler.start()
-    logger.info("스케줄러 시작 → 15분마다 뉴스 수집, 1시간마다 재분석, 6시간마다 원문 정리")
+    logger.info("스케줄러 시작 → 15분마다 뉴스 수집, 15분마다 재분석, 6시간마다 원문 정리")
